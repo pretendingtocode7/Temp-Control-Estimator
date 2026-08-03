@@ -1,0 +1,82 @@
+<table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
+  <tr>
+    <td style="vertical-align:middle;"><img src="{{branding.logo_url}}" alt="{{branding.company_name}}" style="max-height:72px;height:auto;display:block;" /></td>
+    <td style="vertical-align:middle;text-align:right;font-size:12px;color:#646970;">
+      {{branding.address_line}}<br />
+      {{branding.license}}
+    </td>
+  </tr>
+</table>
+<p style="margin-top:0;font-size:12px;color:#646970;">Proposal Date: {{today}}</p>
+
+<hr />
+
+<p><strong>Prepared for:</strong><br />
+{{customer.name}}<br />
+{{customer.billing_street}}<br />
+{{customer.billing_city}}, {{customer.billing_state}} {{customer.billing_zip}}<br />
+{{#customer.phone}}{{customer.phone}}<br />{{/customer.phone}}
+{{#customer.email}}{{customer.email}}{{/customer.email}}</p>
+
+<h3>Proposal — Air Conditioning Replacement</h3>
+<p>Replacement of the outdoor condenser and matching indoor evaporator coil. Existing furnace and ductwork will be retained and inspected during installation.</p>
+
+<h3>Equipment to Be Installed</h3>
+
+{{#systems}}
+<h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
+<ul style="margin-top:4px;">
+  {{#condenser}}
+  <li><strong>Condenser</strong> — {{brand}} Model {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}} refrigerant{{/refrigerant}}{{#stages}}, {{stages}} stage{{/stages}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/condenser}}
+  {{#coil}}
+  <li><strong>Evaporator Coil</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/coil}}
+  {{#thermostat}}
+  <li><strong>Thermostat</strong> — {{brand}} Model {{model}}</li>
+  {{/thermostat}}
+</ul>
+{{/systems}}
+
+<h3>Scope of Work</h3>
+<ul>
+  <li>Remove existing condenser and coil; recover refrigerant per EPA Section 608</li>
+  <li>Install new condenser on existing pad (replace pad if structurally compromised)</li>
+  <li>Install matched evaporator coil above existing furnace plenum</li>
+  <li>Replace line set if existing line set is not compatible with R-410A / R-454B</li>
+  <li>Nitrogen pressure test, triple evacuate, weigh in refrigerant charge to manufacturer spec</li>
+  <li>Verify temperature split and static pressure; document readings</li>
+  <li>Inspect and service existing furnace and ductwork connections</li>
+</ul>
+
+{{#special_notes}}
+<h3>Additional Notes</h3>
+<p>{{special_notes}}</p>
+{{/special_notes}}
+
+<h3>Warranty</h3>
+<ul>
+  <li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty (new AC equipment)</li>
+  <li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>
+</ul>
+
+{{#has_rebates}}
+<h3>Rebates and Incentives</h3>
+<ul>
+  {{#rebates}}
+  <li>{{name}}: {{amount_formatted}}</li>
+  {{/rebates}}
+</ul>
+{{/has_rebates}}
+
+<h3>Investment</h3>
+<table style="width:100%;max-width:500px;border-collapse:collapse;">
+  <tr><td style="padding:6px 0;">Subtotal</td><td style="text-align:right;">{{pricing.subtotal_formatted}}</td></tr>
+  <tr style="border-top:2px solid #214c7a;font-weight:600;">
+    <td style="padding:8px 0;">Total Project Cost</td>
+    <td style="text-align:right;">{{pricing.total_formatted}}</td>
+  </tr>
+</table>
+
+<hr style="margin-top:24px;" />
+<p style="font-size:12px;color:#646970;">Valid for 30 days. Price reflects standard installation; any unforeseen site conditions (electrical upgrade, condensate drain rework, disconnect replacement) are itemized separately if discovered.</p>

@@ -1,0 +1,99 @@
+<table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
+  <tr>
+    <td style="vertical-align:middle;"><img src="{{branding.logo_url}}" alt="{{branding.company_name}}" style="max-height:72px;height:auto;display:block;" /></td>
+    <td style="vertical-align:middle;text-align:right;font-size:12px;color:#646970;">
+      {{branding.address_line}}<br />
+      {{branding.license}}
+    </td>
+  </tr>
+</table>
+<p style="margin-top:0;font-size:12px;color:#646970;">Proposal Date: {{today}}</p>
+
+<hr />
+
+<p><strong>Prepared for:</strong><br />
+{{customer.name}}<br />
+{{customer.billing_street}}<br />
+{{customer.billing_city}}, {{customer.billing_state}} {{customer.billing_zip}}<br />
+{{#customer.phone}}{{customer.phone}}<br />{{/customer.phone}}
+{{#customer.email}}{{customer.email}}{{/customer.email}}</p>
+
+<h3>Proposal</h3>
+<p>Thank you for the opportunity to propose a full HVAC system replacement. The equipment below is sized to your home, matched to current NJ energy codes, and carries our installation standard and workmanship guarantee.</p>
+
+<h3>Equipment to Be Installed</h3>
+
+{{#systems}}
+<h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
+<ul style="margin-top:4px;">
+  {{#furnace}}
+  <li><strong>Furnace</strong> — {{brand}} Model {{model}}{{#afue}} ({{afue}}% AFUE{{/afue}}{{#btu_output}}, {{btu_output}} BTU output{{/btu_output}}{{#stages}}, {{stages}} stage{{/stages}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/furnace}}
+  {{#condenser}}
+  <li><strong>Condenser</strong> — {{brand}} Model {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}}{{/refrigerant}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/condenser}}
+  {{#coil}}
+  <li><strong>Evaporator Coil</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/coil}}
+  {{#air_handler}}
+  <li><strong>Air Handler</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/air_handler}}
+  {{#thermostat}}
+  <li><strong>Thermostat</strong> — {{brand}} Model {{model}}</li>
+  {{/thermostat}}
+  {{#has_other}}
+  {{#other}}
+  <li><strong>{{slot}}</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
+  {{/other}}
+  {{/has_other}}
+</ul>
+{{/systems}}
+
+<h3>Scope of Work</h3>
+<ul>
+  <li>Remove and dispose of existing equipment per NJ refrigerant recovery regulations</li>
+  <li>Install new equipment with proper isolation pads, flue connections, and condensate management</li>
+  <li>Evacuate and charge refrigerant lines to manufacturer specification</li>
+  <li>Pressure-test gas connections and verify leak-free operation</li>
+  <li>Commission system: measure static pressure, verify airflow, confirm temperature split</li>
+  <li>Review operation and maintenance schedule with homeowner</li>
+</ul>
+
+{{#special_notes}}
+<h3>Additional Notes</h3>
+<p>{{special_notes}}</p>
+{{/special_notes}}
+
+<h3>Warranty</h3>
+<ul>
+  <li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty</li>
+  <li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>
+</ul>
+
+{{#has_rebates}}
+<h3>Rebates and Incentives</h3>
+<ul>
+  {{#rebates}}
+  <li>{{name}}: {{amount_formatted}}</li>
+  {{/rebates}}
+</ul>
+{{/has_rebates}}
+
+<h3>Investment</h3>
+<table style="width:100%;max-width:500px;border-collapse:collapse;">
+  <tr><td style="padding:6px 0;">Subtotal</td><td style="text-align:right;">{{pricing.subtotal_formatted}}</td></tr>
+  <tr style="border-top:2px solid #214c7a;font-weight:600;">
+    <td style="padding:8px 0;">Total Project Cost</td>
+    <td style="text-align:right;">{{pricing.total_formatted}}</td>
+  </tr>
+  {{#pricing.deposit_percent}}
+  <tr><td style="padding:6px 0;color:#646970;font-size:13px;">Deposit ({{pricing.deposit_percent}}%)</td><td style="text-align:right;color:#646970;font-size:13px;">{{pricing.deposit_amount_formatted}}</td></tr>
+  {{/pricing.deposit_percent}}
+</table>
+
+{{#has_financing}}
+<p style="margin-top:16px;"><em>Financing available — {{financing.term_months}}-month terms through approved lenders. Applications processed at time of acceptance.</em></p>
+{{/has_financing}}
+
+<hr style="margin-top:24px;" />
+<p style="font-size:12px;color:#646970;">This proposal is valid for 30 days from the date above. Prices are subject to equipment availability and do not include any required permits beyond those standard for NJ residential HVAC work.</p>

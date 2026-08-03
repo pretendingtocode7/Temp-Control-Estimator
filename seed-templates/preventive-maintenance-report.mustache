@@ -1,0 +1,80 @@
+<table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
+  <tr>
+    <td style="vertical-align:middle;"><img src="{{branding.logo_url}}" alt="{{branding.company_name}}" style="max-height:72px;height:auto;display:block;" /></td>
+    <td style="vertical-align:middle;text-align:right;font-size:12px;color:#646970;">
+      {{branding.address_line}}<br />
+      {{branding.license}}
+    </td>
+  </tr>
+</table>
+<p style="margin-top:0;font-size:12px;color:#646970;">Preventive Maintenance Report | Service Date: {{today}}</p>
+
+<hr />
+
+<p><strong>Customer:</strong><br />
+{{customer.name}}<br />
+{{customer.billing_street}}<br />
+{{customer.billing_city}}, {{customer.billing_state}} {{customer.billing_zip}}</p>
+
+<h3>Equipment Serviced</h3>
+
+{{#systems}}
+<h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
+<ul style="margin-top:4px;">
+  {{#furnace}}
+  <li><strong>Furnace</strong> — {{brand}} {{model}}{{#afue}} ({{afue}}% AFUE{{/afue}})</li>
+  {{/furnace}}
+  {{#condenser}}
+  <li><strong>Condenser</strong> — {{brand}} {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}})</li>
+  {{/condenser}}
+  {{#coil}}
+  <li><strong>Evaporator Coil</strong> — {{brand}} {{model}}</li>
+  {{/coil}}
+  {{#air_handler}}
+  <li><strong>Air Handler</strong> — {{brand}} {{model}}</li>
+  {{/air_handler}}
+</ul>
+{{/systems}}
+
+<h3>Maintenance Performed</h3>
+
+<p><strong>Heating side:</strong></p>
+<ul>
+  <li>Inspected heat exchanger for cracks, corrosion, and carbon buildup</li>
+  <li>Cleaned and inspected burner assembly and flame sensor</li>
+  <li>Checked ignition sequence and flame characteristics</li>
+  <li>Verified gas pressure at manifold; adjusted as needed</li>
+  <li>Measured temperature rise across heat exchanger; confirmed within manufacturer spec</li>
+  <li>Tested safety controls: high-limit switch, rollout switch, pressure switch</li>
+  <li>Inspected venting and combustion air intake for obstruction</li>
+</ul>
+
+<p><strong>Cooling side:</strong></p>
+<ul>
+  <li>Washed condenser coil and inspected for fin damage</li>
+  <li>Checked refrigerant charge by superheat / subcooling method</li>
+  <li>Measured temperature split across evaporator coil</li>
+  <li>Tested capacitor microfarad rating against nameplate tolerance</li>
+  <li>Measured amp draw on compressor and condenser fan motor</li>
+  <li>Cleared condensate drain line; confirmed drain flow</li>
+  <li>Inspected contactor for pitting and heat damage</li>
+</ul>
+
+<p><strong>Air-side:</strong></p>
+<ul>
+  <li>Replaced air filter (homeowner-supplied / contractor-supplied)</li>
+  <li>Inspected blower wheel and motor; lubricated bearings where applicable</li>
+  <li>Measured static pressure across air handler; verified within design range</li>
+  <li>Inspected accessible ductwork for disconnections and insulation damage</li>
+</ul>
+
+{{#special_notes}}
+<h3>Findings &amp; Recommendations</h3>
+<p>{{special_notes}}</p>
+{{/special_notes}}
+
+<h3>System Status</h3>
+<p>All systems serviced are operating within manufacturer specifications at the time of this visit. Your next scheduled maintenance visit will be advised per your maintenance plan terms.</p>
+
+<hr style="margin-top:24px;" />
+<p style="font-size:12px;color:#646970;">{{branding.company_name}} | {{branding.license}}. Questions about this report: call your service coordinator.</p>

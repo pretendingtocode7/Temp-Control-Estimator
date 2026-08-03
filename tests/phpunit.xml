@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+    bootstrap="bootstrap.php"
+    colors="true"
+    cacheResultFile=".phpunit.cache"
+    displayDetailsOnTestsThatTriggerWarnings="true"
+    beStrictAboutCoversAnnotation="false"
+    beStrictAboutOutputDuringTests="true"
+    failOnWarning="true"
+>
+    <testsuites>
+        <testsuite name="unit">
+            <file>test-token-renderer.php</file>
+            <file>test-rate-limiter.php</file>
+        </testsuite>
+        <testsuite name="integration">
+            <file>test-zoho-api.php</file>
+            <file>test-security.php</file>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>../includes</directory>
+            <directory>../endpoints</directory>
+        </include>
+    </source>
+</phpunit>

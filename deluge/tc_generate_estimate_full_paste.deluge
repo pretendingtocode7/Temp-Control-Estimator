@@ -1,0 +1,371 @@
+string standalone.tc_generate_estimate(String payload)
+{
+	try
+	{
+		payload_url = payload;
+		input_map = Map();
+		try
+		{
+			payload_resp = invokeurl
+			[
+				url :payload_url
+				type :GET
+			];
+			if(payload_resp == null || payload_resp.get("ok") != true)
+			{
+				resp = Map();
+				resp.put("ok", false);
+				resp.put("error_code", "tc_deluge_payload_fetch_failed");
+				resp.put("message", "Could not fetch payload from WordPress.");
+				resp.put("payload_url", payload_url);
+				resp.put("payload_response", payload_resp);
+				return resp.toString();
+			}
+			payload_data = ifnull(payload_resp.get("data"), Map());
+			payload_text = ifnull(payload_data.get("payload"), "");
+			if(payload_text == "")
+			{
+				resp = Map();
+				resp.put("ok", false);
+				resp.put("error_code", "tc_deluge_payload_empty");
+				resp.put("message", "Payload fetch succeeded but returned an empty payload.");
+				return resp.toString();
+			}
+			input_map = payload_text.toMap();
+		}
+		catch (e)
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_bad_payload");
+			resp.put("message", "Input payload was not valid JSON: " + e);
+			resp.put("payload_url", payload_url);
+			return resp.toString();
+		}
+
+		meta = input_map.get("meta");
+		books_in = input_map.get("books");
+		crm_in = input_map.get("crm");
+
+		if(meta == null || books_in == null || crm_in == null)
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_missing_sections");
+			resp.put("message", "Payload must contain meta, books, and crm sections.");
+			return resp.toString();
+		}
+
+		idem_key = ifnull(meta.get("idempotency_key"), "");
+		org_id = ifnull(books_in.get("organization_id"), "");
+		if(org_id == "")
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_no_org");
+			resp.put("message", "Missing Books organization_id.");
+			return resp.toString();
+		}
+
+		billing = ifnull(books_in.get("billing_address"), Map());
+		books_line_items = List();
+		raw_lines = ifnull(books_in.get("line_items"), List());
+
+		for each line in raw_lines
+		{
+			bl = Map();
+			line_item_id = ifnull(line.get("item_id"), "");
+			if(line_item_id != "")
+			{
+				bl.put("item_id", line_item_id);
+			}
+			bl.put("name", ifnull(line.get("name"), ""));
+			bl.put("description", ifnull(line.get("description"), ""));
+			bl.put("rate", ifnull(line.get("rate"), 0));
+			bl.put("quantity", ifnull(line.get("quantity"), 1));
+			books_line_items.add(bl);
+		}
+
+		estimate_body = Map();
+		estimate_body.put("customer_id", ifnull(books_in.get("customer_id"), ""));
+		estimate_body.put("reference_number", ifnull(books_in.get("reference_number"), ""));
+		estimate_body.put("date", ifnull(books_in.get("date"), ""));
+		estimate_body.put("expiry_date", ifnull(books_in.get("expiry_date"), ""));
+		estimate_body.put("line_items", books_line_items);
+		estimate_body.put("notes", ifnull(books_in.get("notes"), ""));
+		estimate_body.put("terms", ifnull(books_in.get("terms"), "This proposal is valid for 30 days. Prices subject to equipment availability."));
+
+		if(billing.get("address") != null && billing.get("address") != "")
+		{
+			ship_addr = Map();
+			ship_addr.put("address", ifnull(billing.get("address"), ""));
+			ship_addr.put("city", ifnull(billing.get("city"), ""));
+			ship_addr.put("state", ifnull(billing.get("state"), ""));
+			ship_addr.put("zip", ifnull(billing.get("zip"), ""));
+			ship_addr.put("country", ifnull(billing.get("country"), "U.S.A."));
+			estimate_body.put("billing_address", ship_addr);
+		}
+
+		estimate_id = "";
+		estimate_number = "";
+		books_subtotal = 0;
+		books_total = 0;
+
+		try
+		{
+			books_response = zoho.books.createRecord("Estimates", org_id, estimate_body, "zbooks");
+		}
+		catch (e)
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_books_exception");
+			resp.put("message", "Books createRecord threw: " + e);
+			return resp.toString();
+		}
+
+		if(books_response == null)
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_books_null");
+			resp.put("message", "Books API returned null.");
+			return resp.toString();
+		}
+
+		books_code = ifnull(books_response.get("code"), -1);
+		if(books_code != 0)
+		{
+			books_msg = ifnull(books_response.get("message"), "Unknown Books error.");
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_books_failed");
+			resp.put("message", "Books estimate creation failed: " + books_msg);
+			return resp.toString();
+		}
+
+		estimate_rec = ifnull(books_response.get("estimate"), Map());
+		estimate_id = ifnull(estimate_rec.get("estimate_id"), "").toString();
+		estimate_number = ifnull(estimate_rec.get("estimate_number"), "").toString();
+		books_subtotal = ifnull(estimate_rec.get("sub_total"), 0);
+		books_total = ifnull(estimate_rec.get("total"), 0);
+
+		if(estimate_id == "")
+		{
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_books_no_id");
+			resp.put("message", "Books estimate created but no estimate_id in response.");
+			return resp.toString();
+		}
+
+		books_email_sent = false;
+		books_email_message = "Books email was not attempted.";
+
+		deal_body = Map();
+		deal_body.put("Deal_Name", ifnull(crm_in.get("deal_name"), "Untitled Deal"));
+		deal_body.put("Stage", ifnull(crm_in.get("stage"), "Proposal Sent"));
+		deal_body.put("Closing_Date", ifnull(crm_in.get("closing_date"), ""));
+		deal_body.put("Amount", ifnull(crm_in.get("amount"), 0));
+		deal_body.put("Description", ifnull(crm_in.get("description"), ""));
+
+		account_id = ifnull(crm_in.get("account_id"), "").toString();
+		if(account_id != "")
+		{
+			account_lookup = Map();
+			account_lookup.put("id", account_id);
+			deal_body.put("Account_Name", account_lookup);
+		}
+
+		deal_id = "";
+		crm_failed = false;
+		crm_error_message = "";
+
+		try
+		{
+			crm_response = zoho.crm.createRecord("Deals", deal_body);
+			crm_code = ifnull(crm_response.get("code"), "").toString();
+			crm_details = Map();
+			if(crm_code == "" && crm_response.get("id") != null)
+			{
+				crm_code = "SUCCESS";
+				crm_details.put("id", ifnull(crm_response.get("id"), ""));
+			}
+			else if(crm_code == "" && crm_response.get("data") != null)
+			{
+				crm_data = ifnull(crm_response.get("data"), List());
+				if(crm_data.size() > 0)
+				{
+					crm_first = ifnull(crm_data.get(0), Map());
+					crm_code = ifnull(crm_first.get("code"), "").toString();
+					crm_details = ifnull(crm_first.get("details"), Map());
+				}
+			}
+			else
+			{
+				crm_details = ifnull(crm_response.get("details"), Map());
+			}
+
+			if(crm_code == "SUCCESS")
+			{
+				deal_id = ifnull(crm_details.get("id"), "").toString();
+				if(deal_id == "")
+				{
+					crm_failed = true;
+					crm_error_message = "CRM Deal created but no id in response.";
+				}
+			}
+			else
+			{
+				crm_failed = true;
+				crm_error_message = "CRM createRecord response: " + crm_response.toString();
+			}
+		}
+		catch (e)
+		{
+			crm_failed = true;
+			crm_error_message = "CRM createRecord threw: " + e;
+		}
+
+		if(crm_failed)
+		{
+			rollback_notes = "";
+			try
+			{
+				void_resp = invokeurl
+				[
+					url: "https://www.zohoapis.com/books/v3/estimates/" + estimate_id + "/status/void?organization_id=" + org_id
+					type: POST
+					connection: "zbooks"
+				];
+				void_code = ifnull(void_resp.get("code"), -1);
+				if(void_code != 0)
+				{
+					rollback_notes = " | rollback void returned code=" + void_code + " message=" + ifnull(void_resp.get("message"), "");
+				}
+				else
+				{
+					rollback_notes = " | rolled back estimate " + estimate_id;
+				}
+			}
+			catch (e2)
+			{
+				rollback_notes = " | rollback attempt threw: " + e2;
+			}
+			resp = Map();
+			resp.put("ok", false);
+			resp.put("error_code", "tc_deluge_crm_failed");
+			resp.put("message", crm_error_message + rollback_notes);
+			return resp.toString();
+		}
+
+		try
+		{
+			deal_update = Map();
+			deal_update.put("Books_Estimate_ID", estimate_id);
+			deal_update.put("Books_Estimate_Number", estimate_number);
+			deal_update.put("Idempotency_Key", idem_key);
+			deal_update.put("Financing_Requested", ifnull(crm_in.get("financing_requested"), false));
+			deal_update.put("Financing_Term_Months", ifnull(crm_in.get("financing_term"), 0));
+
+			quoted = List();
+			raw_quoted = ifnull(crm_in.get("quoted_equipment"), List());
+			for each row in raw_quoted
+			{
+				sub = Map();
+				sub.put("Slot", ifnull(row.get("Slot"), ""));
+				sub.put("System_Number", ifnull(row.get("System_Number"), 0));
+				sub.put("Brand", ifnull(row.get("Brand"), ""));
+				sub.put("Model", ifnull(row.get("Model"), ""));
+				sub.put("Zoho_Item_ID", ifnull(row.get("CRM_Equipment_ID"), ifnull(row.get("Zoho_Item_ID"), "")));
+				quoted.add(sub);
+			}
+			deal_update.put("Quoted_Equipment", quoted);
+			zoho.crm.updateRecord("Deals", deal_id.toLong(), deal_update);
+		}
+		catch (e4)
+		{
+		}
+
+		annexure_content = ifnull(books_in.get("annexure_content"), "").toString();
+		if(annexure_content != "")
+		{
+			try
+			{
+				annexure_body = Map();
+				annexure_body.put("annexure_content", annexure_content);
+				zoho.books.updateRecord("Estimates", org_id, estimate_id, annexure_body, "zbooks");
+			}
+			catch (annexure_err)
+			{
+			}
+		}
+
+		customer_email = ifnull(books_in.get("customer_email"), "").toString();
+		if(customer_email != "")
+		{
+			try
+			{
+				to_mail_ids = List();
+				to_mail_ids.add(customer_email);
+
+				email_body = Map();
+				email_body.put("send_from_org_email_id", true);
+				email_body.put("to_mail_ids", to_mail_ids);
+				email_body.put("subject", ifnull(books_in.get("email_subject"), "Your Temp Control Estimate"));
+				email_body.put("body", ifnull(books_in.get("email_body"), "Your estimate is ready for review and approval."));
+
+				email_resp = invokeurl
+				[
+					url: "https://www.zohoapis.com/books/v3/estimates/" + estimate_id + "/email?organization_id=" + org_id
+					type: POST
+					parameters: email_body.toString()
+					content-type: "application/json"
+					connection: "zbooks"
+				];
+				email_code = ifnull(email_resp.get("code"), -1);
+				books_email_message = email_resp.toString();
+				if(email_code == 0)
+				{
+					books_email_sent = true;
+				}
+			}
+			catch (email_err)
+			{
+				books_email_sent = false;
+				books_email_message = "Books email threw: " + email_err;
+			}
+		}
+		else
+		{
+			books_email_message = "No customer email was available for Books email.";
+		}
+
+		success = Map();
+		success.put("ok", true);
+		success.put("estimate_id", estimate_id);
+		success.put("estimate_number", estimate_number);
+		success.put("estimate_url", "https://books.zoho.com/app/#/estimates/" + estimate_id);
+		success.put("deal_id", deal_id);
+		success.put("deal_url", "https://crm.zoho.com/crm/tab/Potentials/" + deal_id);
+		success.put("subtotal", books_subtotal);
+		success.put("total", books_total);
+		success.put("books_email_sent", books_email_sent);
+		success.put("books_email_message", books_email_message);
+		return success.toString();
+	}
+	catch (fatal)
+	{
+		resp = Map();
+		resp.put("ok", false);
+		resp.put("error_code", "tc_deluge_fatal");
+		resp.put("message", "Uncaught exception in tc_generate_estimate: " + fatal);
+		return resp.toString();
+	}
+
+	resp = Map();
+	resp.put("ok", false);
+	resp.put("error_code", "tc_deluge_unreachable");
+	resp.put("message", "Function reached final fallback return.");
+	return resp.toString();
+}

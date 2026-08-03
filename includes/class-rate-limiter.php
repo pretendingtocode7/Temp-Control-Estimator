@@ -27,6 +27,7 @@ final class Rate_Limiter {
 		'generate'  => array( 5, 60 ),
 		'generate_hourly' => array( 20, 3600 ),
 		'preview'   => array( 30, 60 ),
+		'send_estimate' => array( 5, 60 ),
 		'customers' => array( 60, 60 ),
 		'equipment' => array( 60, 60 ),
 	);

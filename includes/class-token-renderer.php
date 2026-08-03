@@ -132,6 +132,12 @@ final class Token_Renderer {
 					if ( ! $item ) {
 						continue;
 					}
+					if ( array_key_exists( 'description', $slot ) ) {
+						$description = (string) $slot['description'];
+						$item['short_description'] = $description;
+						$item['long_description']  = $description;
+						$item['description']       = $description;
+					}
 					$item['notes'] = $notes;
 					if ( in_array( $slot_key, $known, true ) ) {
 						$entry[ $slot_key ] = $item;

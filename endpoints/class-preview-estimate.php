@@ -95,11 +95,14 @@ final class Preview_Estimate extends Endpoint_Base {
 		$catalog_by_id = array();
 		foreach ( $item_ids as $id ) {
 			$item = Equipment_Catalog::instance()->get_item( $id );
-			if ( ! is_wp_error( $item ) ) {
-				$catalog_by_id[ $id ] = $item;
+			if ( is_wp_error( $item ) ) {
+				return $this->fail( new WP_Error(
+					'tc_estimate_item_missing',
+					sprintf( __( 'Estimate item %s could not be loaded: %s', 'tc-estimate' ), $id, $item->get_error_message() ),
+					array( 'status' => 400 )
+				) );
 			}
-			// If the item fetch fails we simply skip it — the template will render without that slot filled.
-			// /generate treats missing items as a hard error.
+			$catalog_by_id[ $id ] = $item;
 		}
 
 		// --- Build view + render ---

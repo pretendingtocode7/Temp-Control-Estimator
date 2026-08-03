@@ -107,28 +107,14 @@ defined( 'ABSPATH' ) || exit;
 				<th scope="row"><label for="tc_org_id"><?php esc_html_e( 'Zoho Books Organization ID', 'tc-estimate' ); ?></label></th>
 				<td>
 					<input type="text" id="tc_org_id" name="org_id" value="<?php echo esc_attr( $org_id ); ?>" class="regular-text" autocomplete="off" />
-					<p class="description"><?php esc_html_e( 'Required when creating the aggregate Books estimate.', 'tc-estimate' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Required for loading eligible Books items and creating estimates.', 'tc-estimate' ); ?></p>
 				</td>
 			</tr>
 			<tr>
-				<th scope="row"><label for="tc_crm_equipment_module"><?php esc_html_e( 'CRM Equipment Module API Name', 'tc-estimate' ); ?></label></th>
+				<th scope="row"><?php esc_html_e( 'Estimate Item Source', 'tc-estimate' ); ?></th>
 				<td>
-					<input type="text" id="tc_crm_equipment_module" name="crm_equipment_module" value="<?php echo esc_attr( $crm_equipment_module ); ?>" class="regular-text" autocomplete="off" />
-					<p class="description"><?php esc_html_e( 'Where individual equipment/parts live in CRM. Use Products unless you created a custom module.', 'tc-estimate' ); ?></p>
-				</td>
-			</tr>
-			<tr>
-				<th scope="row"><label for="tc_books_aggregate_item_id"><?php esc_html_e( 'Books Aggregate Item ID', 'tc-estimate' ); ?></label></th>
-				<td>
-					<input type="text" id="tc_books_aggregate_item_id" name="books_aggregate_item_id" value="<?php echo esc_attr( $books_aggregate_item_id ); ?>" class="regular-text" autocomplete="off" />
-					<p class="description"><?php esc_html_e( 'Create one Books item such as "HVAC Installation Package" and paste its item_id here. Books receives only this one line item.', 'tc-estimate' ); ?></p>
-				</td>
-			</tr>
-			<tr>
-				<th scope="row"><label for="tc_books_aggregate_item_name"><?php esc_html_e( 'Books Aggregate Item Name', 'tc-estimate' ); ?></label></th>
-				<td>
-					<input type="text" id="tc_books_aggregate_item_name" name="books_aggregate_item_name" value="<?php echo esc_attr( $books_aggregate_item_name ); ?>" class="regular-text" autocomplete="off" />
-					<p class="description"><?php esc_html_e( 'Shown on the Books estimate. Detailed selected parts remain on the CRM Deal.', 'tc-estimate' ); ?></p>
+					<strong><?php esc_html_e( 'Zoho Books Items', 'tc-estimate' ); ?></strong>
+					<p class="description"><?php esc_html_e( 'Only active Items with the cf_for_estimate checkbox selected are available in the builder. Selected Items become the estimate line items.', 'tc-estimate' ); ?></p>
 				</td>
 			</tr>
 		</table>
@@ -155,9 +141,9 @@ defined( 'ABSPATH' ) || exit;
 			<button type="submit" class="button"><?php esc_html_e( 'Clear Catalog Cache', 'tc-estimate' ); ?></button>
 		</form>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-			<input type="hidden" name="action" value="tc_estimate_test_crm_equipment" />
-			<?php wp_nonce_field( 'tc_estimate_test_crm_equipment' ); ?>
-			<button type="submit" class="button"><?php esc_html_e( 'Test CRM Equipment Module', 'tc-estimate' ); ?></button>
+			<input type="hidden" name="action" value="tc_estimate_test_books_items" />
+			<?php wp_nonce_field( 'tc_estimate_test_books_items' ); ?>
+			<button type="submit" class="button"><?php esc_html_e( 'Test Eligible Books Items', 'tc-estimate' ); ?></button>
 		</form>
 	</div>
 

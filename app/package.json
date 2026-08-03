@@ -1,0 +1,23 @@
+{
+  "name": "temp-control-estimate-builder-app",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Mobile-first React PWA for Temp Control HVAC field-tech estimate generation.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:app": "vite build",
+    "build:sw": "vite build --config vite.sw.config.js",
+    "build": "npm run build:app && npm run build:sw",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.0.2"
+  }
+}

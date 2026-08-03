@@ -1,0 +1,5 @@
+app/node_modules/
+app1/node_modules/
+.DS_Store
+__MACOSX/
+vendor/

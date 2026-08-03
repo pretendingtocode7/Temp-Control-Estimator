@@ -82,6 +82,31 @@ abstract class Endpoint_Base {
 		if ( null === $body || ! is_array( $body ) ) {
 			return new WP_Error( 'tc_estimate_bad_body', __( 'Request body must be JSON.', 'tc-estimate' ), array( 'status' => 400 ) );
 		}
+		return $this->sanitize_item_descriptions( $body );
+	}
+
+	/**
+	 * Sanitize optional per-line description overrides before preview, audit logging,
+	 * template rendering, or estimate generation sees the payload.
+	 */
+	private function sanitize_item_descriptions( array $body ): array {
+		if ( empty( $body['systems'] ) || ! is_array( $body['systems'] ) ) {
+			return $body;
+		}
+
+		foreach ( $body['systems'] as $system_index => $system ) {
+			if ( ! is_array( $system ) || empty( $system['equipment'] ) || ! is_array( $system['equipment'] ) ) {
+				continue;
+			}
+			foreach ( $system['equipment'] as $slot => $item ) {
+				if ( ! is_array( $item ) || ! array_key_exists( 'description', $item ) ) {
+					continue;
+				}
+				$description = sanitize_textarea_field( (string) $item['description'] );
+				$body['systems'][ $system_index ]['equipment'][ $slot ]['description'] = mb_substr( $description, 0, 2000 );
+			}
+		}
+
 		return $body;
 	}
 }

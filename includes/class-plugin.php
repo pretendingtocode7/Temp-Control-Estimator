@@ -66,6 +66,7 @@ final class Plugin {
 			'endpoints/class-preview-estimate.php',
 			'endpoints/class-deluge-payload.php',
 			'endpoints/class-generate-estimate.php',
+			'endpoints/class-send-estimate.php',
 			'endpoints/class-acceptance-webhook.php',
 
 			// Admin.

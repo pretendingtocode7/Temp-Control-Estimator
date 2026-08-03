@@ -205,6 +205,7 @@ final class Estimate_Generator {
 					'BTU_Output'       => (string) ( $item['btu_output'] ?? '' ),
 					'Refrigerant'      => (string) ( $item['refrigerant'] ?? '' ),
 					'Short_Description' => (string) ( $item['short_description'] ?? '' ),
+					'Zoho_Item_ID'     => (string) ( $item['item_id'] ?? '' ),
 					'CRM_Equipment_ID' => (string) ( $item['item_id'] ?? '' ),
 					'Rate'             => (float) ( $item['rate'] ?? 0 ),
 				);
@@ -226,21 +227,29 @@ final class Estimate_Generator {
 					'BTU_Output'       => (string) ( $o['btu_output'] ?? '' ),
 					'Refrigerant'      => (string) ( $o['refrigerant'] ?? '' ),
 					'Short_Description' => (string) ( $o['short_description'] ?? '' ),
+					'Zoho_Item_ID'     => (string) ( $o['item_id'] ?? '' ),
 					'CRM_Equipment_ID' => (string) ( $o['item_id'] ?? '' ),
 					'Rate'             => (float) ( $o['rate'] ?? 0 ),
 				);
 			}
 		}
 
-		$aggregate_item_id = (string) get_option( 'tc_estimate_books_aggregate_item_id', '' );
-		$aggregate_item_name = (string) get_option( 'tc_estimate_books_aggregate_item_name', 'HVAC Installation Package' );
-		$line_items[] = array(
-			'item_id'     => $aggregate_item_id,
-			'name'        => $aggregate_item_name,
-			'description' => $this->books_line_description( $quoted_equipment_rows, $view ),
-			'rate'        => (float) ( $view['pricing']['total'] ?? 0 ),
-			'quantity'    => 1,
-		);
+		$selected_subtotal = 0.0;
+		foreach ( $quoted_equipment_rows as $row ) {
+			$rate = (float) ( $row['Rate'] ?? 0 );
+			$selected_subtotal += $rate;
+			$line_items[] = array(
+				'item_id'     => (string) ( $row['Zoho_Item_ID'] ?? '' ),
+				'name'        => (string) ( $row['Name'] ?? '' ),
+				'description' => (string) ( $row['Short_Description'] ?? '' ),
+				'rate'        => $rate,
+				'quantity'    => 1,
+				'slot'        => (string) ( $row['Slot'] ?? '' ),
+				'system_num'  => (int) ( $row['System_Number'] ?? 0 ),
+			);
+		}
+		$target_total = (float) ( $view['pricing']['total'] ?? $selected_subtotal );
+		$adjustment   = round( $target_total - $selected_subtotal, 2 );
 
 		$billing = isset( $customer['billing_address'] ) && is_array( $customer['billing_address'] ) ? $customer['billing_address'] : array();
 		$wp_user = wp_get_current_user();
@@ -266,6 +275,8 @@ final class Estimate_Generator {
 				'date'             => gmdate( 'Y-m-d' ),
 				'expiry_date'      => gmdate( 'Y-m-d', time() + 30 * DAY_IN_SECONDS ),
 				'line_items'       => $line_items,
+				'adjustment'       => $adjustment,
+				'adjustment_description' => 0.0 === $adjustment ? '' : 'Project price adjustment',
 				'notes'            => $this->books_notes( $customer, $view, $template_meta ),
 				'terms'            => $this->books_terms(),
 				'annexure_content' => $this->books_annexure_content( $quoted_equipment_rows, $view, $template_meta ),

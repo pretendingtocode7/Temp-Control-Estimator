@@ -112,6 +112,17 @@ final class TokenRendererTest extends TestCase {
 		$this->assertSame( 'AC8B3036A1B', $view['systems'][1]['condenser']['model'] );
 	}
 
+	public function test_item_description_override_is_used_without_mutating_catalog(): void {
+		$payload = $this->balson_payload();
+		$payload['systems'][0]['equipment']['furnace']['description'] = 'Customer-specific furnace description';
+		$catalog = $this->catalog();
+
+		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $catalog, $this->meta() );
+
+		$this->assertSame( 'Customer-specific furnace description', $view['systems'][0]['furnace']['short_description'] );
+		$this->assertSame( '96% AFUE single-stage gas furnace', $catalog['100000001']['short_description'] );
+	}
+
 	public function test_rebates_formatted_money(): void {
 		$payload = $this->balson_payload();
 		$payload['options']['rebates'] = array(

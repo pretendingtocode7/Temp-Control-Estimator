@@ -20,6 +20,11 @@ rollback on Deal-insert failure), service worker for offline catalog browsing (n
 with 4s timeout + cache fallback; customer/preview/generate stay online-only), success screen
 with Zoho links, Service-Worker-Allowed header emission for root scope.
 
+**Catalog/send workflow — shipped (0.3.0).** Catalog data comes only from active Zoho Books
+Items with `cf_for_estimate` checked. Selected Items become Books estimate lines, descriptions
+can be edited per estimate, and creation produces a draft for preview before a separate,
+explicit `/send-estimate` action emails the customer.
+
 **Phase 3 — next.** `/webhook/accepted` (HMAC-signed) logic, Deluge `onEstimateAccepted`
 (Deal → Won, Quoted_Equipment → Equipment_To_Install), extension to existing `Invoice_Paid`
 to populate `Installed_Equipment` on Service_Contracts, `/serial-entry` endpoint and

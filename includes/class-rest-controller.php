@@ -36,6 +36,7 @@ final class Rest_Controller {
 		Endpoints\Preview_Estimate::instance()->register();
 		Endpoints\Deluge_Payload::instance()->register();
 		Endpoints\Generate_Estimate::instance()->register();
+		Endpoints\Send_Estimate::instance()->register();
 		Endpoints\Acceptance_Webhook::instance()->register();
 	}
 

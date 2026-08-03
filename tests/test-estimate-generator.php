@@ -202,4 +202,10 @@ final class Test_Estimate_Generator extends TestCase {
 		$this->assertSame( 9200.0, $out['books']['total'] );
 		$this->assertSame( 9200.0, $out['crm']['amount'] );
 	}
+
+	public function test_total_override_is_sent_as_books_adjustment(): void {
+		$out = $this->build( array(), $this->sample_customer(), $this->sample_view(), '<p>body</p>', $this->sample_template(), 'tc-x' );
+		$this->assertSame( 1900.0, $out['books']['adjustment'] );
+		$this->assertSame( 'Project price adjustment', $out['books']['adjustment_description'] );
+	}
 }

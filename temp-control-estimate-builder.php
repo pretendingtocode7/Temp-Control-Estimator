@@ -3,7 +3,7 @@
  * Plugin Name:       Temp Control Estimate Builder
  * Plugin URI:        https://tempcontrolhvac.com
  * Description:       Mobile-first estimate builder for field techs. Pulls templates and equipment from Zoho, generates Books estimates + CRM Deals with one tap.
- * Version:           0.2.38
+ * Version:           0.3.0
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Seven Degrees LLC
@@ -19,7 +19,7 @@ declare( strict_types=1 );
 defined( 'ABSPATH' ) || exit;
 
 // Version constant for asset cache busting and migrations.
-define( 'TC_ESTIMATE_VERSION', '0.2.38' );
+define( 'TC_ESTIMATE_VERSION', '0.3.0' );
 define( 'TC_ESTIMATE_PLUGIN_FILE', __FILE__ );
 define( 'TC_ESTIMATE_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TC_ESTIMATE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

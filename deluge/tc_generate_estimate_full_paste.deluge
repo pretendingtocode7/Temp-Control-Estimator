@@ -94,6 +94,8 @@ string standalone.tc_generate_estimate(String payload)
 		estimate_body.put("line_items", books_line_items);
 		estimate_body.put("notes", ifnull(books_in.get("notes"), ""));
 		estimate_body.put("terms", ifnull(books_in.get("terms"), "This proposal is valid for 30 days. Prices subject to equipment availability."));
+		estimate_body.put("adjustment", ifnull(books_in.get("adjustment"), 0));
+		estimate_body.put("adjustment_description", ifnull(books_in.get("adjustment_description"), ""));
 
 		if(billing.get("address") != null && billing.get("address") != "")
 		{
@@ -301,45 +303,7 @@ string standalone.tc_generate_estimate(String payload)
 			}
 		}
 
-		customer_email = ifnull(books_in.get("customer_email"), "").toString();
-		if(customer_email != "")
-		{
-			try
-			{
-				to_mail_ids = List();
-				to_mail_ids.add(customer_email);
-
-				email_body = Map();
-				email_body.put("send_from_org_email_id", true);
-				email_body.put("to_mail_ids", to_mail_ids);
-				email_body.put("subject", ifnull(books_in.get("email_subject"), "Your Temp Control Estimate"));
-				email_body.put("body", ifnull(books_in.get("email_body"), "Your estimate is ready for review and approval."));
-
-				email_resp = invokeurl
-				[
-					url: "https://www.zohoapis.com/books/v3/estimates/" + estimate_id + "/email?organization_id=" + org_id
-					type: POST
-					parameters: email_body.toString()
-					content-type: "application/json"
-					connection: "zbooks"
-				];
-				email_code = ifnull(email_resp.get("code"), -1);
-				books_email_message = email_resp.toString();
-				if(email_code == 0)
-				{
-					books_email_sent = true;
-				}
-			}
-			catch (email_err)
-			{
-				books_email_sent = false;
-				books_email_message = "Books email threw: " + email_err;
-			}
-		}
-		else
-		{
-			books_email_message = "No customer email was available for Books email.";
-		}
+		books_email_message = "Estimate created as a draft. Customer email requires explicit approval in the Estimate Builder.";
 
 		success = Map();
 		success.put("ok", true);

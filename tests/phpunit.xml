@@ -6,18 +6,19 @@
     colors="true"
     cacheResultFile=".phpunit.cache"
     displayDetailsOnTestsThatTriggerWarnings="true"
-    beStrictAboutCoversAnnotation="false"
+    beStrictAboutCoverageMetadata="false"
     beStrictAboutOutputDuringTests="true"
     failOnWarning="true"
 >
     <testsuites>
         <testsuite name="unit">
-            <file>test-token-renderer.php</file>
-            <file>test-rate-limiter.php</file>
+            <file>TokenRendererTest.php</file>
+            <file>EstimateGeneratorTest.php</file>
+            <file>RateLimiterTest.php</file>
         </testsuite>
         <testsuite name="integration">
-            <file>test-zoho-api.php</file>
-            <file>test-security.php</file>
+            <file>ZohoApiTest.php</file>
+            <file>SecurityTest.php</file>
         </testsuite>
     </testsuites>
     <source>

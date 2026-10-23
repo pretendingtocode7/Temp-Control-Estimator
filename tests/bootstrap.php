@@ -37,7 +37,7 @@ if ( $tests_dir && file_exists( $tests_dir . '/includes/functions.php' ) ) {
 		define( 'ABSPATH', __DIR__ . '/' );
 	}
 	if ( ! defined( 'TC_ESTIMATE_VERSION' ) ) {
-		define( 'TC_ESTIMATE_VERSION', '0.1.0-test' );
+		define( 'TC_ESTIMATE_VERSION', '0.4.8-test' );
 	}
 	if ( ! defined( 'TC_ESTIMATE_PLUGIN_DIR' ) ) {
 		define( 'TC_ESTIMATE_PLUGIN_DIR', dirname( __DIR__ ) . '/' );
@@ -70,7 +70,11 @@ if ( $tests_dir && file_exists( $tests_dir . '/includes/functions.php' ) ) {
 		define( 'SODIUM_CRYPTO_SECRETBOX_KEYBYTES', 32 );
 	}
 
-	// Deliberately DO NOT load /includes/class-plugin.php here — that loader requires WP.
-	// Instead each test file includes only what it needs (Token_Renderer has zero WP dependency
-	// once ABSPATH is defined).
+	require_once __DIR__ . '/standalone-shims.php';
+	if ( ! class_exists( 'Mustache_Engine' ) ) {
+		require_once dirname( __DIR__ ) . '/includes/class-mustache-shim.php';
+	}
+
+	// Each test includes only the plugin classes it needs. Do not load the WordPress
+	// plugin bootstrap or configure real Zoho/email services in standalone mode.
 }

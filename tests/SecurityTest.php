@@ -22,12 +22,16 @@ final class SecurityTest extends TestCase {
 		if ( ! defined( 'TC_ESTIMATE_ENC_KEY' ) ) {
 			define( 'TC_ESTIMATE_ENC_KEY', bin2hex( random_bytes( 32 ) ) );
 		}
+	}
+
+	private function require_sodium(): void {
 		if ( ! function_exists( 'sodium_crypto_secretbox' ) ) {
-			$this->markTestSkipped( 'libsodium required.' );
+			$this->markTestSkipped( 'libsodium required for encryption tests.' );
 		}
 	}
 
 	public function test_encrypt_decrypt_roundtrip(): void {
+		$this->require_sodium();
 		$sec = \TempControl\Estimate\Security::instance();
 		$plain = 'super-secret-refresh-token-abc-123';
 
@@ -40,6 +44,7 @@ final class SecurityTest extends TestCase {
 	}
 
 	public function test_encrypt_produces_different_ciphertext_each_time(): void {
+		$this->require_sodium();
 		// Nonce is random on every encrypt — same plaintext should yield different ciphertext.
 		$sec = \TempControl\Estimate\Security::instance();
 		$plain = 'same-input';
@@ -49,6 +54,7 @@ final class SecurityTest extends TestCase {
 	}
 
 	public function test_tampered_ciphertext_fails_to_decrypt(): void {
+		$this->require_sodium();
 		$sec = \TempControl\Estimate\Security::instance();
 		$encrypted = $sec->encrypt( 'original' );
 		$raw = base64_decode( $encrypted, true );

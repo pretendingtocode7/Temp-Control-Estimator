@@ -52,6 +52,7 @@ final class Zoho_API {
 
 	// Default timeout in seconds (connect + total).
 	private const HTTP_TIMEOUT = 15;
+	private const MULTIPART_TIMEOUT = 45;
 
 	public static function instance(): Zoho_API {
 		if ( null === self::$instance ) {
@@ -85,8 +86,66 @@ final class Zoho_API {
 		return $this->request( 'POST', $service, $path, array(), $body, 'form' );
 	}
 
+	/**
+	 * POST helper for Zoho endpoints that accept JSON plus binary attachments.
+	 *
+	 * @param array $fields Scalar multipart form fields.
+	 * @param array $files  Each file must contain field, filename, mime_type, and contents.
+	 * @param array $query  Query string args.
+	 */
+	public function post_multipart( string $service, string $path, array $fields, array $files, array $query = array() ): array|WP_Error {
+		$boundary = '----TempControlEstimate' . wp_generate_password( 24, false, false );
+		$parts    = array();
+
+		foreach ( $fields as $name => $value ) {
+			if ( ! is_scalar( $value ) ) {
+				return new WP_Error( 'tc_estimate_multipart_field', __( 'Invalid multipart form field.', 'tc-estimate' ), array( 'status' => 500 ) );
+			}
+
+			$parts[] = '--' . $boundary;
+			$parts[] = 'Content-Disposition: form-data; name="' . $this->multipart_token( (string) $name ) . '"';
+			$parts[] = '';
+			$parts[] = (string) $value;
+		}
+
+		foreach ( $files as $file ) {
+			if ( ! is_array( $file ) || ! isset( $file['field'], $file['filename'], $file['contents'] ) || ! is_string( $file['contents'] ) ) {
+				return new WP_Error( 'tc_estimate_multipart_file', __( 'Invalid multipart file.', 'tc-estimate' ), array( 'status' => 500 ) );
+			}
+
+			$field     = $this->multipart_token( (string) $file['field'] );
+			$filename  = $this->multipart_token( (string) $file['filename'] );
+			$mime_type = preg_replace( '/[^a-z0-9.+\/-]/i', '', (string) ( $file['mime_type'] ?? 'application/octet-stream' ) );
+
+			$parts[] = '--' . $boundary;
+			$parts[] = 'Content-Disposition: form-data; name="' . $field . '"; filename="' . $filename . '"';
+			$parts[] = 'Content-Type: ' . $mime_type;
+			$parts[] = '';
+			$parts[] = $file['contents'];
+		}
+
+		$parts[] = '--' . $boundary . '--';
+		$parts[] = '';
+
+		return $this->request(
+			'POST',
+			$service,
+			$path,
+			$query,
+			implode( "\r\n", $parts ),
+			'multipart',
+			array( 'Content-Type' => 'multipart/form-data; boundary=' . $boundary ),
+			false,
+			self::MULTIPART_TIMEOUT
+		);
+	}
+
 	public function put( string $service, string $path, array $body ): array|WP_Error {
 		return $this->request( 'PUT', $service, $path, array(), $body );
+	}
+
+	public function delete( string $service, string $path, array $query = array() ): array|WP_Error {
+		return $this->request( 'DELETE', $service, $path, $query, null );
 	}
 
 	/**
@@ -94,7 +153,7 @@ final class Zoho_API {
 	 *
 	 * @return array|WP_Error Decoded JSON body on success, WP_Error on failure.
 	 */
-	private function request( string $method, string $service, string $path, array $query, ?array $body, string $body_format = 'json' ): array|WP_Error {
+	private function request( string $method, string $service, string $path, array $query, array|string|null $body, string $body_format = 'json', array $body_headers = array(), bool $retry_transient_failures = true, int $timeout = self::HTTP_TIMEOUT ): array|WP_Error {
 		if ( $this->circuit_open() ) {
 			return new WP_Error( 'tc_estimate_zoho_circuit_open', __( 'Zoho integration temporarily disabled after repeated failures. Retry in ~60s.', 'tc-estimate' ), array( 'status' => 503 ) );
 		}
@@ -109,8 +168,11 @@ final class Zoho_API {
 			$url = add_query_arg( $query, $url );
 		}
 
-		// Three attempts: 1s, 2s, 4s backoff.
-		$delays = array( 0, 1, 2, 4 );
+		// Default retry sequence: initial request, then 1s, 2s, and 4s backoff.
+		// Email delivery is intentionally not retried after an ambiguous network/5xx
+		// response: Zoho may already have accepted it, which could otherwise send the
+		// customer duplicate messages. A 401 gets one safe token-refresh attempt.
+		$delays = $retry_transient_failures ? array( 0, 1, 2, 4 ) : array( 0, 0 );
 		$last_error = null;
 
 		foreach ( $delays as $i => $delay ) {
@@ -125,12 +187,13 @@ final class Zoho_API {
 
 			$args = array(
 				'method'  => $method,
-				'timeout' => self::HTTP_TIMEOUT,
+				'timeout' => $timeout,
 				'headers' => array(
 					'Authorization' => 'Zoho-oauthtoken ' . $token,
 					'Accept'        => 'application/json',
 				),
 			);
+			$args['headers'] = array_merge( $args['headers'], $body_headers );
 
 			if ( null !== $body && 'json' === $body_format ) {
 				$args['headers']['Content-Type'] = 'application/json';
@@ -144,6 +207,9 @@ final class Zoho_API {
 			if ( is_wp_error( $response ) ) {
 				$last_error = $response;
 				$this->record_failure();
+				if ( ! $retry_transient_failures ) {
+					return $last_error;
+				}
 				continue; // network error — retry.
 			}
 
@@ -174,6 +240,9 @@ final class Zoho_API {
 					array( 'status' => 502, 'body' => $raw )
 				);
 				$this->record_failure();
+				if ( ! $retry_transient_failures ) {
+					return $last_error;
+				}
 				continue;
 			}
 
@@ -218,6 +287,13 @@ final class Zoho_API {
 		}
 
 		return $last_error ?: new WP_Error( 'tc_estimate_zoho_unknown', __( 'Zoho request failed after retries.', 'tc-estimate' ), array( 'status' => 502 ) );
+	}
+
+	/**
+	 * Remove characters that could break a multipart Content-Disposition header.
+	 */
+	private function multipart_token( string $value ): string {
+		return str_replace( array( "\r", "\n", '"' ), '', $value );
 	}
 
 	/**

@@ -2,8 +2,8 @@
 /**
  * Standalone smoke test — no composer required.
  *
- * Shims a minimal Mustache_Engine that covers the subset of features our templates use,
- * then runs the core renderer tests to prove the Phase 1 data flow is correct.
+ * Uses the bundled Mustache fallback and early WordPress stand-ins to check
+ * rendering, v0.4.8 transaction shaping, and draft creation with an in-memory Zoho double.
  *
  * The full PHPUnit suite (with real Mustache.php via composer) is in tests/.
  * This file is for "did I break something obvious" verification.
@@ -13,129 +13,20 @@
 
 declare( strict_types=1 );
 
-// --- Minimal Mustache_Engine shim ---
-if ( ! class_exists( 'Mustache_Engine' ) ) {
-	class Mustache_Engine {
-		public function __construct( array $opts = array() ) {}
-
-		public function render( string $template, array $data ): string {
-			return $this->renderScope( $template, array( $data ) );
-		}
-
-		private function renderScope( string $template, array $scopes ): string {
-			// Handle sections {{#name}}...{{/name}} and inverted {{^name}}...{{/name}} including nested.
-			while ( preg_match( '/\{\{([#^])([a-zA-Z0-9_.]+)\}\}/', $template, $m, PREG_OFFSET_CAPTURE ) ) {
-				$type      = $m[1][0];
-				$name      = $m[2][0];
-				$open_pos  = (int) $m[0][1];
-				$open_len  = strlen( $m[0][0] );
-
-				// Find matching close, accounting for nested sections of the same name.
-				$depth  = 1;
-				$cursor = $open_pos + $open_len;
-				$close_pos = null;
-				$close_len = 0;
-				while ( preg_match( '/\{\{([#^\/])' . preg_quote( $name, '/' ) . '\}\}/', $template, $mc, PREG_OFFSET_CAPTURE, $cursor ) ) {
-					$t = $mc[1][0];
-					$pos = (int) $mc[0][1];
-					$len = strlen( $mc[0][0] );
-					if ( '/' === $t ) {
-						$depth--;
-						if ( 0 === $depth ) {
-							$close_pos = $pos;
-							$close_len = $len;
-							break;
-						}
-					} else {
-						$depth++;
-					}
-					$cursor = $pos + $len;
-				}
-				if ( null === $close_pos ) {
-					break; // Unbalanced — bail.
-				}
-
-				$inner = substr( $template, $open_pos + $open_len, $close_pos - ( $open_pos + $open_len ) );
-				$value = $this->lookup( $name, $scopes );
-				$rendered = '';
-
-				if ( '#' === $type ) {
-					if ( is_array( $value ) && array_is_list( $value ) ) {
-						foreach ( $value as $item ) {
-							$rendered .= $this->renderScope( $inner, array_merge( $scopes, array( is_array( $item ) ? $item : array( '.' => $item ) ) ) );
-						}
-					} elseif ( ! empty( $value ) ) {
-						$new_scopes = is_array( $value ) ? array_merge( $scopes, array( $value ) ) : $scopes;
-						$rendered = $this->renderScope( $inner, $new_scopes );
-					}
-				} else { // '^'
-					if ( empty( $value ) || ( is_array( $value ) && array_is_list( $value ) && 0 === count( $value ) ) ) {
-						$rendered = $this->renderScope( $inner, $scopes );
-					}
-				}
-
-				$template = substr( $template, 0, $open_pos ) . $rendered . substr( $template, $close_pos + $close_len );
-			}
-
-			// Handle {{variable}} substitution — HTML escaped.
-			$template = preg_replace_callback( '/\{\{(\{?)([a-zA-Z0-9_.]+)\}?\}\}/', function ( $m ) use ( $scopes ) {
-				$value = $this->lookup( $m[2], $scopes );
-				if ( is_bool( $value ) ) {
-					return $value ? '1' : '';
-				}
-				if ( null === $value || is_array( $value ) ) {
-					return '';
-				}
-				$str = (string) $value;
-				return $m[1] === '{' ? $str : htmlspecialchars( $str, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8' );
-			}, $template );
-
-			return (string) $template;
-		}
-
-		private function lookup( string $dotted_name, array $scopes ) {
-			$keys = explode( '.', $dotted_name );
-			// Walk scopes from innermost to outermost.
-			foreach ( array_reverse( $scopes ) as $scope ) {
-				if ( ! is_array( $scope ) ) {
-					continue;
-				}
-				$cursor = $scope;
-				$found  = true;
-				foreach ( $keys as $k ) {
-					if ( is_array( $cursor ) && array_key_exists( $k, $cursor ) ) {
-						$cursor = $cursor[ $k ];
-					} else {
-						$found = false;
-						break;
-					}
-				}
-				if ( $found ) {
-					return $cursor;
-				}
-			}
-			return null;
-		}
-	}
-}
+// Exercise the same Mustache fallback shipped in the saved installer.
+require_once __DIR__ . '/standalone-shims.php';
+require_once dirname( __DIR__ ) . '/includes/class-mustache-shim.php';
 
 // --- Set up constants so the renderer loads ---
 define( 'ABSPATH', __DIR__ . '/' );
-define( 'TC_ESTIMATE_VERSION', '0.1.0-smoke' );
+define( 'TC_ESTIMATE_VERSION', '0.4.8-smoke' );
 
 require_once dirname( __DIR__ ) . '/includes/class-token-renderer.php';
 
-echo "Smoke test — running against Token_Renderer with shimmed Mustache engine.\n\n";
-
-// Re-declare the class in a non-PHPUnit-dependent way: redefine TestCase as a trivial base.
-// We do this by copying the class body into a local context that doesn't require PHPUnit.
-
-// Simpler: instantiate TokenRendererTest via reflection would fail because its parent doesn't exist.
-// So we do it manually — call the static methods we want, creating the logic inline.
+echo "Smoke test — running against Token_Renderer with the bundled Mustache fallback.\n\n";
 
 $renderer = \TempControl\Estimate\Token_Renderer::instance();
 
-$tests = array();
 $pass = 0;
 $fail = 0;
 
@@ -206,13 +97,6 @@ $catalog = array(
 );
 $meta = array( 'id' => 1, 'name' => 'Full Replacement', 'template_type' => 'full_replacement', 'default_warranty_parts' => 10, 'default_warranty_labor' => 10, 'version' => 1 );
 
-// date_i18n shim.
-if ( ! function_exists( 'date_i18n' ) ) {
-	function date_i18n( $format, $timestamp = null ) {
-		return date( $format, $timestamp ?? time() );
-	}
-}
-
 $view = $renderer->build_payload_view( $payload, $customer, $catalog, $meta );
 $assert( $view['customer']['name'] === 'Brian Balson', 'customer name' );
 $assert( count( $view['systems'] ) === 1, 'one system' );
@@ -271,7 +155,8 @@ $assert( str_contains( $rendered, 'Brian Balson' ), 'customer name in output' );
 $assert( str_contains( $rendered, 'Coleman' ), 'brand in output' );
 $assert( str_contains( $rendered, 'AC8B3036A1B' ), 'condenser model in output' );
 $assert( str_contains( $rendered, '$18,300.00' ), 'total in output' );
-$assert( str_contains( $rendered, '10-Year' ), 'warranty in output' );
+$assert( str_contains( $rendered, 'Includes a 10-year manufacturer parts warranty.' ), 'selected parts warranty in output' );
+$assert( str_contains( $rendered, 'Includes a 10-year labor warranty with an active Temp Control maintenance agreement.' ), 'selected labor warranty in output' );
 $assert( ! str_contains( $rendered, 'Second Floor' ), 'no multi-system leakage' );
 
 // ------ Test 10: two-system seed renders both ------
@@ -287,37 +172,13 @@ $assert( substr_count( $rendered2, 'TG9S080C16MP11A' ) === 2, 'furnace model app
 // ------ Test 11: Phase 2 — Estimate_Generator payload shape ------
 echo "\nphase2_generator_payload_shape\n";
 
-// Load the generator class (it doesn't need WP to be loaded for shape testing).
-if ( ! defined( 'TC_ESTIMATE_VERSION' ) ) {
-	define( 'TC_ESTIMATE_VERSION', '0.2.0' );
-}
-// Minimal WP shims so the class file can be included without a full WP bootstrap.
-if ( ! function_exists( 'get_option' ) ) {
-	function get_option( string $k, $d = '' ) { return $k === 'tc_estimate_zoho_org_id' ? '60000000000' : ( $k === 'tc_estimate_zoho_dc' ? 'com' : $d ); }
-}
-if ( ! function_exists( 'wp_strip_all_tags' ) ) {
-	function wp_strip_all_tags( string $s, bool $remove_breaks = false ): string { return trim( strip_tags( $s ) ); }
-}
-if ( ! function_exists( 'wp_get_current_user' ) ) {
-	function wp_get_current_user() { return (object) array( 'ID' => 1, 'display_name' => 'Smoke Tester' ); }
-}
-if ( ! function_exists( 'get_current_user_id' ) ) {
-	function get_current_user_id(): int { return 1; }
-}
-if ( ! function_exists( 'current_time' ) ) {
-	function current_time( string $type, bool $gmt = false ): string { return gmdate( 'Y-m-d H:i:s' ); }
-}
-if ( ! defined( 'ABSPATH' ) ) { define( 'ABSPATH', __DIR__ ); }
-if ( ! defined( 'DAY_IN_SECONDS' ) ) { define( 'DAY_IN_SECONDS', 86400 ); }
-if ( ! function_exists( '__' ) ) { function __( $s, $d = null ) { return $s; } }
-
+// Only pure payload shaping is invoked here; no WordPress or provider calls.
 require_once __DIR__ . '/../includes/class-estimate-generator.php';
 
-// We can't instantiate the real Estimate_Generator here (it depends on Zoho_API), but we can
-// reflectively test its static shape transformation.
+// Invoke the current transformation without creating any provider records.
 $generator = TempControl\Estimate\Estimate_Generator::instance();
 $ref = new ReflectionClass( TempControl\Estimate\Estimate_Generator::class );
-$m = $ref->getMethod( 'build_deluge_payload' );
+$m = $ref->getMethod( 'build_transaction_payload' );
 $m->setAccessible( true );
 
 $test_view = array(
@@ -337,6 +198,7 @@ $test_view = array(
 );
 $test_customer = array(
 	'id' => '20000000000',
+	'books_contact_id' => '30000000000',
 	'name' => 'Test Customer',
 	'billing_address' => array( 'street' => '1 Main', 'city' => 'Edison', 'state' => 'NJ', 'zip' => '08817', 'country' => 'U.S.A.' ),
 );
@@ -344,7 +206,7 @@ $test_template = array( 'id' => 42, 'name' => 'Test Template', 'template_type' =
 
 $dp = $m->invoke( $generator, array(), $test_customer, $test_view, '<p>Test body</p>', $test_template, 'tc-smoke-1', '60000000000' );
 
-$assert( isset( $dp['meta'], $dp['books'], $dp['crm'] ), 'deluge payload has meta/books/crm sections' );
+$assert( isset( $dp['meta'], $dp['books'], $dp['crm'] ), 'transaction payload has meta/books/crm sections' );
 $assert( 'tc-smoke-1' === $dp['meta']['idempotency_key'], 'idempotency_key propagated to meta' );
 $assert( 42 === $dp['meta']['template_id'], 'template_id in meta' );
 $assert( 3 === $dp['meta']['template_version'], 'template_version in meta' );
@@ -358,8 +220,57 @@ $assert( false === $dp['crm']['financing_requested'], 'financing flag false by d
 $assert( 3200.0 === (float) $dp['books']['subtotal'], 'books subtotal matches view' );
 $assert( 3200.0 === (float) $dp['crm']['amount'], 'crm amount matches total' );
 $assert( str_contains( $dp['crm']['deal_name'], 'Test Customer' ), 'deal_name includes customer' );
-$assert( str_contains( $dp['books']['notes'], 'Test body' ), 'notes include stripped body' );
-$assert( ! str_contains( $dp['books']['notes'], '<p>' ), 'notes have no html tags' );
+$assert( '<p>Test body</p>' === $dp['books']['template_body'], 'polished HTML stays in template_body' );
+$assert( str_contains( $dp['books']['notes'], 'approve through Zoho Books' ), 'Books notes explain the approval workflow' );
+$assert( ! str_contains( $dp['books']['notes'], '<p>' ), 'Books notes stay plain text' );
+$assert( '30000000000' === $dp['books']['customer_id'], 'Books contact ID stays separate from CRM account ID' );
+$assert( '20000000000' === $dp['crm']['account_id'], 'CRM account ID is preserved' );
+$assert( 0.0 === $dp['books']['adjustment'], 'matching project total needs no adjustment' );
+
+// ------ Test 12: Books draft boundary, with no HTTP or email implementation loaded ------
+echo "\nbooks_draft_boundary_with_synthetic_responses\n";
+if ( class_exists( 'TempControl\\Estimate\\Zoho_API', false ) ) {
+	throw new LogicException( 'Smoke tests require an isolated process; the real Zoho API must not be loaded.' );
+}
+require_once __DIR__ . '/fixtures/zoho-api-double.php';
+class_alias( TempControl\Estimate\Tests\ZohoApiDouble::class, 'TempControl\\Estimate\\Zoho_API' );
+$api = TempControl\Estimate\Tests\ZohoApiDouble::instance();
+$create_draft = $ref->getMethod( 'create_books_draft' );
+$create_draft->setAccessible( true );
+
+$api->responses = array( array( 'code' => 0, 'estimate' => array( 'estimate_id' => '90000000001', 'status' => 'draft' ) ) );
+$draft = $create_draft->invoke( $generator, $dp['books'] );
+$assert( '90000000001' === $draft['estimate_id'], 'a draft response is accepted' );
+$assert( 1 === count( $api->calls ), 'draft creation makes one provider call' );
+$request = $api->calls[0];
+$assert( 'POST' === $request['method'] && 'books' === $request['service'], 'draft targets the Books estimate API' );
+$assert( '/estimates?organization_id=60000000000&send=false' === $request['path'], 'Books creation explicitly disables send' );
+$assert( '30000000000' === $request['body']['customer_id'], 'provider receives the Books customer ID' );
+$assert( 3200.0 === $request['body']['line_items'][0]['rate'], 'provider receives the selected line price' );
+$assert( ! array_key_exists( 'slot', $request['body']['line_items'][0] ) && ! array_key_exists( 'edit_key', $request['body']['line_items'][0] ), 'internal edit metadata is excluded from provider lines' );
+$assert( ! array_key_exists( 'email_body', $request['body'] ) && ! array_key_exists( 'template_body', $request['body'] ), 'draft creation does not submit email/proposal bodies' );
+
+$provider_error = new WP_Error( 'synthetic_timeout', 'Synthetic provider timeout', array( 'status' => 502 ) );
+$api->calls = array();
+$api->responses = array( $provider_error );
+$error = $create_draft->invoke( $generator, $dp['books'] );
+$assert( $provider_error === $error, 'provider transport errors propagate without invented success' );
+$assert( 1 === count( $api->calls ), 'uncertain provider result is not retried by draft creation' );
+
+$api->responses = array( array( 'code' => 42, 'message' => 'Synthetic validation failure' ) );
+$error = $create_draft->invoke( $generator, $dp['books'] );
+$assert( is_wp_error( $error ) && 'tc_estimate_books_create_failed' === $error->get_error_code(), 'provider validation failure stays an error' );
+$api->responses = array( array( 'code' => 0, 'estimate' => array( 'status' => 'draft' ) ) );
+$error = $create_draft->invoke( $generator, $dp['books'] );
+$assert( is_wp_error( $error ) && 'tc_estimate_books_no_id' === $error->get_error_code(), 'a response without an estimate ID is rejected' );
+
+$api->calls = array();
+$api->responses = array( array( 'code' => 0, 'estimate' => array( 'estimate_id' => '90000000002', 'status' => 'sent' ) ) );
+$error = $create_draft->invoke( $generator, $dp['books'] );
+$assert( is_wp_error( $error ) && 'tc_estimate_books_not_draft' === $error->get_error_code(), 'an unexpectedly sent estimate is rejected' );
+$assert( 2 === count( $api->calls ) && 'DELETE' === $api->calls[1]['method'], 'unexpected status triggers synthetic cleanup' );
+$assert( '/estimates/90000000002' === $api->calls[1]['path'], 'cleanup targets only the newly returned estimate' );
+$assert( array( 'organization_id' => '60000000000' ) === $api->calls[1]['query'], 'cleanup retains the organization boundary' );
 
 // ------ Summary ------
 echo "\n" . str_repeat( '=', 60 ) . "\n";

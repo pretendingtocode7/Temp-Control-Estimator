@@ -1,5 +1,11 @@
 # Temp Control Estimate Builder — Claude Code Context
 
+The current runtime is the saved v0.4.8 installer. Its editable frontend source
+has not been recovered; do not rebuild or replace its bundled interface from
+the older v0.2.38/v0.3.0 sources. See `docs/releases/v0.4.8-maintenance.md` for
+the search evidence and current test results. Phase descriptions below retain
+historical context and are not a complete description of the v0.4.8 runtime.
+
 ## What this is
 
 WordPress plugin for Temp Control HVAC field techs to generate Zoho Books estimates + CRM Deals
@@ -54,8 +60,9 @@ install-completion form in the React app.
 ```bash
 php tests/smoke.php
 ```
-Produces 34 assertions against Token_Renderer + seed templates. Uses a minimal Mustache
-shim at `tests/mustache-shim.php`.
+Produces 71 assertions against the shipped Mustache fallback, renderer/seed
+templates, v0.4.8 transaction payload and draft creation with an in-memory Zoho
+double. It does not load real HTTP or email implementations.
 
 **Full PHPUnit suite (requires `composer install`):**
 ```bash
@@ -63,7 +70,7 @@ composer install
 vendor/bin/phpunit -c tests/phpunit.xml
 ```
 Full tests exercise Zoho_API circuit breaker, rate limiter, Security encryption roundtrip.
-WP-integration tests (test-zoho-api.php, test-rate-limiter.php) require `WP_TESTS_DIR` set
+WP-integration tests (`ZohoApiTest.php`, `RateLimiterTest.php`) require `WP_TESTS_DIR` set
 to wp-phpunit.
 
 **Sample proposals:**
@@ -85,12 +92,17 @@ Writes `samples/balson-full-replacement.html` and `samples/clemente-two-system.h
 
 ## Smoke test assertion count
 
-50 assertions total (up from 34 in Phase 1). Phase 2 adds 15 assertions covering
-`Estimate_Generator::build_deluge_payload()` — meta/books/crm section presence,
-idempotency_key propagation, line-item mapping from slots, quoted_equipment subform
-rows, deal-name truncation, financing flag propagation, HTML strip in notes.
+71 assertions total. The generator checks use `build_transaction_payload()`:
+meta/books/crm sections, separate contact/account IDs, idempotency/template
+metadata, line mapping, pricing and plain approval notes separate from proposal
+HTML. Synthetic provider responses cover `send=false`, errors and non-draft
+cleanup. PHPUnit adds detailed renderer/edit/permit/adjustment coverage.
 
 ## Building the React app
+
+These are historical build commands. The saved v0.4.8 archive has built assets
+only; its matching source, package files and Vite configuration are absent.
+Do not use an older branch's sources to overwrite the v0.4.8 bundle.
 
 ```bash
 cd app

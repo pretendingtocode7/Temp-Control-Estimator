@@ -143,7 +143,8 @@ final class TokenRendererTest extends TestCase {
 		$this->assertStringContainsString( 'Coleman', $rendered );
 		$this->assertStringContainsString( 'AC8B3036A1B', $rendered );
 		$this->assertStringContainsString( '$18,300.00', $rendered );
-		$this->assertStringContainsString( '10-Year', $rendered );
+		$this->assertStringContainsString( 'Includes a 10-year manufacturer parts warranty.', $rendered );
+		$this->assertStringContainsString( 'Includes a 10-year labor warranty with an active Temp Control maintenance agreement.', $rendered );
 		// Should NOT contain the "Second Floor" language — only one system present.
 		$this->assertStringNotContainsString( 'Second Floor', $rendered );
 	}
@@ -169,6 +170,71 @@ final class TokenRendererTest extends TestCase {
 	public function test_unknown_tokens_render_as_empty_string(): void {
 		$result = $this->renderer->render( 'Before [{{missing_field}}] After', array() );
 		$this->assertSame( 'Before [] After', $result );
+	}
+
+	public function test_proposal_notes_follow_selected_options(): void {
+		$payload = $this->balson_payload();
+		$payload['options'] = array( 'warranty_parts_years' => 0, 'warranty_labor_years' => 0 );
+		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $this->catalog(), $this->meta() );
+		$this->assertFalse( $view['has_proposal_notes'] );
+		$this->assertSame( array(), $view['proposal_notes'] );
+		$rendered = $this->renderer->render( $this->load_template( 'full-replacement.mustache' ), $view );
+		$this->assertStringNotContainsString( 'Proposal Notes', $rendered );
+		$this->assertStringNotContainsString( '10-year', $rendered );
+
+		$payload['options']['credit_card_fee_applies'] = true;
+		$payload['options']['financing_fee_applies'] = true;
+		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $this->catalog(), $this->meta() );
+		$this->assertCount( 2, $view['proposal_notes'] );
+		$rendered = $this->renderer->render( $this->load_template( 'full-replacement.mustache' ), $view );
+		$this->assertStringContainsString( 'An additional processing fee applies to credit card payments.', $rendered );
+		$this->assertStringContainsString( 'An additional financing fee applies when the project is financed.', $rendered );
+		$this->assertStringNotContainsString( '10-year', $rendered );
+	}
+
+	public function test_edited_description_is_escaped_and_only_permit_rate_can_be_overridden(): void {
+		$payload = $this->balson_payload();
+		$catalog = $this->catalog();
+		$catalog['100000001']['rate'] = 3200;
+		$catalog['100000010'] = array( 'item_id' => '100000010', 'name' => 'Permit <city>', 'rate' => 125 );
+		$payload['systems'][0]['equipment']['furnace']['description'] = '<script>alert(1)</script> Approved scope';
+		$payload['systems'][0]['equipment']['furnace']['rate'] = 1;
+		$payload['systems'][0]['equipment']['permit'] = array( 'item_id' => '100000010', 'rate' => 375.126 );
+		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $catalog, $this->meta() );
+		$this->assertSame( 3200, $view['systems'][0]['furnace']['rate'] );
+		$this->assertSame( 375.13, $view['systems'][0]['permit']['rate'] );
+		$this->assertSame( 125, $catalog['100000010']['rate'], 'The source catalog stays unchanged.' );
+		$rendered = $this->renderer->render( $this->load_template( 'full-replacement.mustache' ), $view );
+		$this->assertStringNotContainsString( '<script>', $rendered );
+		$this->assertStringContainsString( '&lt;script&gt;', $rendered );
+		$this->assertStringContainsString( 'Permit &lt;city&gt;', $rendered );
+		$this->assertStringContainsString( '$375.13', $rendered );
+
+		foreach ( array( -10 => 0, 100001 => 100000 ) as $requested => $expected ) {
+			$payload['systems'][0]['equipment']['permit']['rate'] = $requested;
+			$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $catalog, $this->meta() );
+			$this->assertSame( $expected, $view['systems'][0]['permit']['rate'] );
+		}
+	}
+
+	public function test_legacy_template_receives_escaped_notes_and_permit_once(): void {
+		$view = array(
+			'customer' => array( 'name' => 'Fixture Customer' ),
+			'proposal_notes' => array( array( 'text' => 'Selected note <unsafe>' ) ),
+			'systems' => array( array( 'permit' => array( 'display_name' => 'Permit <city>', 'short_description' => 'Approved <scope>', 'rate' => 200 ) ) ),
+		);
+		$legacy = $this->renderer->render( '<p>{{customer.name}}</p>', $view );
+		$this->assertSame( 1, substr_count( $legacy, '<h3>Proposal Notes</h3>' ) );
+		$this->assertSame( 1, substr_count( $legacy, '<h3>Permit</h3>' ) );
+		$this->assertStringContainsString( 'Selected note &lt;unsafe&gt;', $legacy );
+		$this->assertStringContainsString( 'Permit &lt;city&gt;', $legacy );
+		$this->assertStringContainsString( '$200.00', $legacy );
+		$this->assertStringNotContainsString( '<unsafe>', $legacy );
+
+		$modern = $this->renderer->render( '{{#proposal_notes}}{{text}}{{/proposal_notes}}{{#systems}}{{#permit}}{{display_name}}{{/permit}}{{/systems}}', $view );
+		$this->assertSame( 1, substr_count( $modern, 'Selected note' ) );
+		$this->assertSame( 1, substr_count( $modern, 'Permit' ) );
+		$this->assertStringNotContainsString( '<h3>', $modern );
 	}
 
 	// ----- Fixtures -----

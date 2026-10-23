@@ -44,7 +44,8 @@ final class Token_Renderer {
 			return new WP_Error( 'tc_estimate_no_mustache', __( 'Mustache.php not installed. Run composer install.', 'tc-estimate' ), array( 'status' => 500 ) );
 		}
 		try {
-			return $engine->render( $template_body, $view );
+			$rendered = $engine->render( $template_body, $view );
+			return $this->append_compatibility_sections( $rendered, $template_body, $view );
 		} catch ( \Throwable $e ) {
 			return new WP_Error(
 				'tc_estimate_render_failed',
@@ -52,6 +53,51 @@ final class Token_Renderer {
 				array( 'status' => 500 )
 			);
 		}
+	}
+
+	/**
+	 * Keep older saved templates useful when new proposal options are introduced.
+	 * Existing operator-authored template HTML is never overwritten; only selected
+	 * notes or permit details that the template cannot render are appended.
+	 */
+	private function append_compatibility_sections( string $rendered, string $template_body, array $view ): string {
+		$sections = array();
+
+		if ( ! str_contains( $template_body, 'proposal_notes' ) && ! empty( $view['proposal_notes'] ) && is_array( $view['proposal_notes'] ) ) {
+			$items = array();
+			foreach ( $view['proposal_notes'] as $note ) {
+				$text = is_array( $note ) ? trim( (string) ( $note['text'] ?? '' ) ) : '';
+				if ( '' !== $text ) {
+					$items[] = '<li>' . esc_html( $text ) . '</li>';
+				}
+			}
+			if ( ! empty( $items ) ) {
+				$sections[] = '<h3>Proposal Notes</h3><ul>' . implode( '', $items ) . '</ul>';
+			}
+		}
+
+		if ( ! str_contains( $template_body, '{{#permit}}' ) && ! str_contains( $template_body, '{{#items}}' ) ) {
+			$permit_items = array();
+			foreach ( (array) ( $view['systems'] ?? array() ) as $system ) {
+				if ( ! is_array( $system ) || empty( $system['permit'] ) || ! is_array( $system['permit'] ) ) {
+					continue;
+				}
+				$permit      = $system['permit'];
+				$name        = trim( (string) ( $permit['display_name'] ?? $permit['name'] ?? 'Permit' ) );
+				$description = trim( (string) ( $permit['short_description'] ?? '' ) );
+				$amount      = (string) ( $permit['rate_formatted'] ?? $this->format_money( (float) ( $permit['rate'] ?? 0 ) ) );
+				$detail      = esc_html( $name );
+				if ( '' !== $description ) {
+					$detail .= ' — ' . esc_html( $description );
+				}
+				$permit_items[] = sprintf( '<li>%s — <strong>%s</strong></li>', $detail, esc_html( $amount ) );
+			}
+			if ( ! empty( $permit_items ) ) {
+				$sections[] = '<h3>Permit</h3><ul>' . implode( '', $permit_items ) . '</ul>';
+			}
+		}
+
+		return empty( $sections ) ? $rendered : $rendered . "\n" . implode( "\n", $sections );
 	}
 
 	/**
@@ -120,8 +166,9 @@ final class Token_Renderer {
 
 				// Known slot keys get their own top-level keys (furnace, condenser, coil, air_handler, thermostat).
 				// Anything else goes into "other" for templates to iterate.
-				$known = array( 'furnace', 'condenser', 'coil', 'air_handler', 'thermostat', 'humidifier', 'uv_purifier', 'water_heater', 'filter', 'part' );
+				$known = array( 'furnace', 'condenser', 'coil', 'air_handler', 'thermostat', 'humidifier', 'uv_purifier', 'water_heater', 'filter', 'part', 'permit' );
 				$other = array();
+				$items = array();
 				foreach ( $equipment as $slot_key => $slot ) {
 					if ( ! is_array( $slot ) ) {
 						continue;
@@ -132,7 +179,29 @@ final class Token_Renderer {
 					if ( ! $item ) {
 						continue;
 					}
+					if ( array_key_exists( 'description', $slot ) ) {
+						$description = (string) $slot['description'];
+						$item['short_description'] = $description;
+						$item['long_description']  = $description;
+						$item['description']       = $description;
+					}
+					if ( 'permit' === $slot_key && array_key_exists( 'rate', $slot ) ) {
+						$item['rate'] = max( 0, min( 100000, round( (float) $slot['rate'], 2 ) ) );
+					}
 					$item['notes'] = $notes;
+					$item['slot'] = (string) $slot_key;
+					$item['slot_label'] = ucwords( str_replace( '_', ' ', (string) $slot_key ) );
+					$name  = trim( (string) ( $item['name'] ?? '' ) );
+					$model = trim( (string) ( $item['model'] ?? '' ) );
+					$item['display_name'] = $name;
+					if ( '' === $item['display_name'] ) {
+						$item['display_name'] = trim( sprintf( '%s %s', (string) ( $item['brand'] ?? '' ), $model ) );
+					} elseif ( '' !== $model && false === stripos( $item['display_name'], $model ) ) {
+						$item['display_name'] .= ' — Model ' . $model;
+					}
+					$item['rate_formatted'] = $this->format_money( (float) ( $item['rate'] ?? 0 ) );
+					$item['is_permit'] = 'permit' === $slot_key;
+					$items[] = $item;
 					if ( in_array( $slot_key, $known, true ) ) {
 						$entry[ $slot_key ] = $item;
 					} else {
@@ -141,12 +210,28 @@ final class Token_Renderer {
 				}
 				$entry['other']     = $other;
 				$entry['has_other'] = ! empty( $other );
+				$entry['items']     = $items;
 				$systems[] = $entry;
 			}
 		}
 
 		$parts_years = isset( $options['warranty_parts_years'] ) ? (int) $options['warranty_parts_years'] : (int) ( $template_meta['default_warranty_parts'] ?? 0 );
 		$labor_years = isset( $options['warranty_labor_years'] ) ? (int) $options['warranty_labor_years'] : (int) ( $template_meta['default_warranty_labor'] ?? 0 );
+		$credit_card_fee = ! empty( $options['credit_card_fee_applies'] );
+		$financing_fee   = ! empty( $options['financing_fee_applies'] );
+		$proposal_notes  = array();
+		if ( 10 === $parts_years ) {
+			$proposal_notes[] = array( 'text' => __( 'Includes a 10-year manufacturer parts warranty.', 'tc-estimate' ) );
+		}
+		if ( 10 === $labor_years ) {
+			$proposal_notes[] = array( 'text' => __( 'Includes a 10-year labor warranty with an active Temp Control maintenance agreement.', 'tc-estimate' ) );
+		}
+		if ( $credit_card_fee ) {
+			$proposal_notes[] = array( 'text' => __( 'An additional processing fee applies to credit card payments.', 'tc-estimate' ) );
+		}
+		if ( $financing_fee ) {
+			$proposal_notes[] = array( 'text' => __( 'An additional financing fee applies when the project is financed.', 'tc-estimate' ) );
+		}
 
 		$subtotal = (float) ( $pricing['subtotal'] ?? 0 );
 		$total    = (float) ( $pricing['total'] ?? $subtotal );
@@ -188,6 +273,10 @@ final class Token_Renderer {
 				'term_months'  => (int) ( $options['financing_term_months'] ?? 0 ),
 			),
 			'has_financing' => ! empty( $options['financing_requested'] ),
+			'credit_card_fee_applies' => $credit_card_fee,
+			'financing_fee_applies'   => $financing_fee,
+			'proposal_notes'           => $proposal_notes,
+			'has_proposal_notes'       => ! empty( $proposal_notes ),
 			'pricing'       => array(
 				'subtotal'                => $subtotal,
 				'subtotal_formatted'      => $this->format_money( $subtotal ),

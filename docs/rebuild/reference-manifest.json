@@ -1,0 +1,235 @@
+{
+  "provenance": "Exact saved v0.4.8 installer imported in PR #2; reconstruction is separate.",
+  "archive": {
+    "path": "temp-control-estimate-builder.zip",
+    "size_bytes": 407252,
+    "sha256": "0c1c04ef023b6aa094b2237e1f62452bed8f08d37ed4308e2d9aa0732937f56b"
+  },
+  "files": [
+    {
+      "path": "admin/class-admin-menu.php",
+      "size_bytes": 1763,
+      "sha256": "c124d585bf1c002d41b9dbb175fefb4205e76d7c343532b17f09856a51ed69e7"
+    },
+    {
+      "path": "admin/class-audit-viewer.php",
+      "size_bytes": 1243,
+      "sha256": "ed1a08c138104141fe1f5df8c9f7a727a8cd78c06bd9151e53a18ac6cc867325"
+    },
+    {
+      "path": "admin/class-settings-page.php",
+      "size_bytes": 14162,
+      "sha256": "894ac1bbdbab709467845ae30553d4c6bd7c2693920903c11f0166d5b8768b4a"
+    },
+    {
+      "path": "admin/class-template-editor.php",
+      "size_bytes": 1550,
+      "sha256": "e5fa22d94dfc9b1201d118896539cea0af540500fb25a90fb4efa3412684ebae"
+    },
+    {
+      "path": "admin/views/audit-log.php",
+      "size_bytes": 3761,
+      "sha256": "4d7528b7b34af405e2e9b001ffcbaa22fa5de0a2f5301baad77e17f555a7f1ba"
+    },
+    {
+      "path": "admin/views/settings.php",
+      "size_bytes": 17619,
+      "sha256": "3fdd495a8457beacc09ada5dd81ec9b91111c26ba87ea28399bca203f744653e"
+    },
+    {
+      "path": "admin/views/template-meta.php",
+      "size_bytes": 5077,
+      "sha256": "4646c35afa87381cde6a2c106c86b2d44d83056f9b6443a92b477b83dcbfe592"
+    },
+    {
+      "path": "app/dist/estimate-builder.css",
+      "size_bytes": 13307,
+      "sha256": "d08c3cdd87834e9ecd7ec198250cada6d139e32d4d8b8dcefbe47e86e65c7c04"
+    },
+    {
+      "path": "app/dist/estimate-builder.js",
+      "size_bytes": 962332,
+      "sha256": "382be1210b9d5c3d5f1592ecc50f3c4ee813dc7a2b286ea260a6aaef30930b66"
+    },
+    {
+      "path": "app/dist/service-worker.js",
+      "size_bytes": 2302,
+      "sha256": "ee4914c674dca91808637fecaba4af98c563a813797d9df6b4ccdaf1999dafa5"
+    },
+    {
+      "path": "assets/logo.jpg",
+      "size_bytes": 8888,
+      "sha256": "b0c86d50c31343cfaec41abfa6a5a583da69aab70bf092fb46c481d1bc7efee6"
+    },
+    {
+      "path": "composer.json",
+      "size_bytes": 1282,
+      "sha256": "da597dc6a1e9078b5f647286be617dc865e2cd072839ef02dc50e5c31bbd48a1"
+    },
+    {
+      "path": "endpoints/class-acceptance-webhook.php",
+      "size_bytes": 1997,
+      "sha256": "43b7ed6c9d45844b7b73a61c4799d5b4177c273d7708e0fd397f8082d7ca1958"
+    },
+    {
+      "path": "endpoints/class-deluge-payload.php",
+      "size_bytes": 1685,
+      "sha256": "e8c34a522d72dbc1476d8ec2b13851b9ab47021f7d24d239ecd73ead49649192"
+    },
+    {
+      "path": "endpoints/class-endpoint-base.php",
+      "size_bytes": 5677,
+      "sha256": "47a30f5428595448d6cf6f1505397c0b86bde53d14f59f02a34beb414c1eabf0"
+    },
+    {
+      "path": "endpoints/class-generate-estimate.php",
+      "size_bytes": 11687,
+      "sha256": "ec44b53081c41f49d49235b226939f4b0ae1b2f6fa82a9126762d13900b515b7"
+    },
+    {
+      "path": "endpoints/class-get-templates.php",
+      "size_bytes": 3288,
+      "sha256": "3310cad1bfa2e1ffbf90dd5569c726744d8336c38cf74006cf28b6c3b7c1918a"
+    },
+    {
+      "path": "endpoints/class-preview-estimate.php",
+      "size_bytes": 5247,
+      "sha256": "34e7fba64d4434325ba676e7efe7df9158d7fdc7470f977dccf44e5ce5aeb4f4"
+    },
+    {
+      "path": "endpoints/class-search-customers.php",
+      "size_bytes": 1521,
+      "sha256": "a4b67a62e0ce1d8e951062026a521eeecac00238f509fe2d57f4cfc1f1210a79"
+    },
+    {
+      "path": "endpoints/class-search-equipment.php",
+      "size_bytes": 2627,
+      "sha256": "15a998d6a0df4b456860d2cd2c92124ffcf8155e4ba5af32af7cc1f31f88cb68"
+    },
+    {
+      "path": "endpoints/class-send-estimate.php",
+      "size_bytes": 20709,
+      "sha256": "0396785ff0052e1c4d36b9a11af5c5df0884c2f5f4654608d6357e81776e8bf4"
+    },
+    {
+      "path": "endpoints/class-update-estimate.php",
+      "size_bytes": 6903,
+      "sha256": "a46af8b685f825c76fa2419ffd5db880efbec3beb6fa942420e3b7015e0e9d4c"
+    },
+    {
+      "path": "includes/class-audit-log.php",
+      "size_bytes": 5643,
+      "sha256": "f59012ad343d39a9e539f9722a687bee0167f5dbf07451dfcb4fdfcd3f05970f"
+    },
+    {
+      "path": "includes/class-capabilities.php",
+      "size_bytes": 1864,
+      "sha256": "678601290a636c37cea6e768de08c74ff16cd9df9a7e883c353c21f015410694"
+    },
+    {
+      "path": "includes/class-customer-search.php",
+      "size_bytes": 4352,
+      "sha256": "06922298e4089facc383bc11a024f28bc72c8626988cb8e2ff193046a6e66656"
+    },
+    {
+      "path": "includes/class-equipment-catalog.php",
+      "size_bytes": 13268,
+      "sha256": "0a3334de63ee7c8669621d54740602b69c20341b75c8d0820a121c14b2becf0b"
+    },
+    {
+      "path": "includes/class-estimate-generator.php",
+      "size_bytes": 32855,
+      "sha256": "854d3b8e00f3a796d4f06937c49aa97a43d98e5018b950c36211655a159c78cf"
+    },
+    {
+      "path": "includes/class-mustache-shim.php",
+      "size_bytes": 4126,
+      "sha256": "278adb0f1abac78eadf4eddfed128ee47d71ed9cb093ce827f453daa8148ee47"
+    },
+    {
+      "path": "includes/class-plugin.php",
+      "size_bytes": 6535,
+      "sha256": "ccfd9c746af320ab428ac3831776c03c6525d9eb61155058598c77c3ae06ff1b"
+    },
+    {
+      "path": "includes/class-rate-limiter.php",
+      "size_bytes": 2597,
+      "sha256": "d6594d9d4c04039ba81da29c6c6c18080741600453ccad3a68cfacd866fe0d91"
+    },
+    {
+      "path": "includes/class-rest-controller.php",
+      "size_bytes": 1737,
+      "sha256": "d960367cb7c73363c82a9efbf26c16ba838d22089c347275c2b80e0d09700cdc"
+    },
+    {
+      "path": "includes/class-security.php",
+      "size_bytes": 7557,
+      "sha256": "d049d104994de604aea5a5279027b08ad916114db2d8fea3538f57d354b588f2"
+    },
+    {
+      "path": "includes/class-template-cpt.php",
+      "size_bytes": 2012,
+      "sha256": "ceb34c329efa614492ba85391c2e88e58d387bd1b1c0d476fde7f190eb45b576"
+    },
+    {
+      "path": "includes/class-template-meta.php",
+      "size_bytes": 6671,
+      "sha256": "e6d8c224d52e4c884707c7f0afd97a4f729eb6c8de5873552ece779a1fa9024b"
+    },
+    {
+      "path": "includes/class-token-renderer.php",
+      "size_bytes": 14297,
+      "sha256": "26ec7c26bf2c6289d029773b22728c3872e2ed4fc1818059fbe83d3215147a13"
+    },
+    {
+      "path": "includes/class-zoho-api.php",
+      "size_bytes": 15440,
+      "sha256": "efc08e50d829588e0d1c378a71a67227152253b6c1dda39db72b9da02bce0249"
+    },
+    {
+      "path": "includes/class-zoho-cache.php",
+      "size_bytes": 3047,
+      "sha256": "ca9eebbb27e265a0c9e4bd0bd3f00793a2b2b01a4ae23c4d7384156ada22cedc"
+    },
+    {
+      "path": "public/class-enqueue.php",
+      "size_bytes": 3269,
+      "sha256": "a0c275130d4e2e3db98370e2dc7f2197d21f5f0941128787c28bcfebeca0562e"
+    },
+    {
+      "path": "public/class-shortcode.php",
+      "size_bytes": 4551,
+      "sha256": "219429cff62f5066d9a8714caaf56cc7a523d32871ee699b5ebc96af3872b4cf"
+    },
+    {
+      "path": "readme.txt",
+      "size_bytes": 19359,
+      "sha256": "7cbdff52e7786b228c5f46b4283830a60c881ee101611418cc4be18e7bc22761"
+    },
+    {
+      "path": "seed-templates/ac-only-replacement.mustache",
+      "size_bytes": 3102,
+      "sha256": "0cd793726c44b8e092f8110502f8b3680bcd373df015a771a42a39a3739aa12a"
+    },
+    {
+      "path": "seed-templates/full-replacement.mustache",
+      "size_bytes": 3514,
+      "sha256": "a1da050a49dde4c22bb0e20fda18897d8d5907c2c272819dc3606fd6b36b7290"
+    },
+    {
+      "path": "seed-templates/preventive-maintenance-report.mustache",
+      "size_bytes": 3225,
+      "sha256": "2c9ed5dde6e0fd6fc8fb23a30943b104b7bf227d62888840094357665f4ddf58"
+    },
+    {
+      "path": "temp-control-estimate-builder.php",
+      "size_bytes": 3296,
+      "sha256": "76598a141a446f01995f5a2ee7580d34620f0d77fe30679e47c1c05c76f57fbe"
+    },
+    {
+      "path": "uninstall.php",
+      "size_bytes": 1795,
+      "sha256": "95540aa3f7aa15ea1d483e363786725bb8b5432146f2bf8314696be5e41e9a2c"
+    }
+  ]
+}

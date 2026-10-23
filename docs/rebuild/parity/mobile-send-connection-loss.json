@@ -1,0 +1,290 @@
+{
+  "scenario": "send-connection-loss",
+  "viewport": "mobile",
+  "viewportSize": {
+    "width": 390,
+    "height": 844
+  },
+  "browser": "156.0.8078.47",
+  "reference": "saved v0.4.8 app/dist",
+  "rebuilt": "reconstructed candidate dist",
+  "assets": {
+    "reference": {
+      "estimate-builder.js": "382be1210b9d5c3d5f1592ecc50f3c4ee813dc7a2b286ea260a6aaef30930b66",
+      "estimate-builder.css": "d08c3cdd87834e9ecd7ec198250cada6d139e32d4d8b8dcefbe47e86e65c7c04"
+    },
+    "rebuilt": {
+      "estimate-builder.js": "64ba26a6cb957db60376790e10eaa25b7a116ac3629ca6aa96c4969d5a2b4b56",
+      "estimate-builder.css": "550651b9f9babd3f1943b0fb563bb9fa3d1f3990d2d21d281401484212373f7d"
+    }
+  },
+  "screens": {
+    "send-pending-connection-loss": {
+      "dimensionsEqual": true,
+      "width": 390,
+      "height": 1612,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "mobile-send-pending-connection-loss-reference.png",
+      "rebuilt": "mobile-send-pending-connection-loss-rebuilt.png",
+      "referenceSha256": "d92a22727a7ccb647918ad25828dddf17175ab4a7c6099c83f67a187a7284c22",
+      "rebuiltSha256": "d92a22727a7ccb647918ad25828dddf17175ab4a7c6099c83f67a187a7284c22",
+      "domSha256": "786af428abbfb44ac8ac344f6ba20133ee060f65f2ab467c13b28bda57b9cf94"
+    }
+  },
+  "externalRequests": [],
+  "browserErrors": [],
+  "requestParity": true,
+  "mockedApi": {
+    "reads": [
+      {
+        "method": "GET",
+        "path": "/customers",
+        "query": {
+          "q": "Fixture",
+          "limit": "20"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "limit": "1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "type": "furnace",
+          "limit": "100"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/send-status",
+        "query": {
+          "job_id": "fixture-job-1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/send-status",
+        "query": {
+          "job_id": "fixture-job-1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/templates",
+        "query": {},
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      }
+    ],
+    "mutations": [
+      {
+        "method": "POST",
+        "path": "/preview",
+        "query": {},
+        "body": {
+          "template_id": 42,
+          "customer": {
+            "zoho_account_id": "200000000000000001"
+          },
+          "systems": [
+            {
+              "system_number": 1,
+              "system_label": "Main System",
+              "equipment": {
+                "furnace": {
+                  "item_id": "400000000000000001",
+                  "description": "80k BTU furnace"
+                }
+              }
+            }
+          ],
+          "options": {
+            "warranty_parts_years": 10,
+            "warranty_labor_years": 10,
+            "special_notes": "",
+            "rebates": [],
+            "financing_requested": false,
+            "financing_term_months": 60,
+            "credit_card_fee_applies": false,
+            "financing_fee_applies": false
+          },
+          "pricing": {
+            "subtotal": 3200,
+            "total": 4000,
+            "deposit_percent": 35
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/generate",
+        "query": {},
+        "body": {
+          "template_id": 42,
+          "customer": {
+            "zoho_account_id": "200000000000000001"
+          },
+          "systems": [
+            {
+              "system_number": 1,
+              "system_label": "Main System",
+              "equipment": {
+                "furnace": {
+                  "item_id": "400000000000000001",
+                  "description": "80k BTU furnace"
+                }
+              }
+            }
+          ],
+          "options": {
+            "warranty_parts_years": 10,
+            "warranty_labor_years": 10,
+            "special_notes": "",
+            "rebates": [],
+            "financing_requested": false,
+            "financing_term_months": 60,
+            "credit_card_fee_applies": false,
+            "financing_fee_applies": false
+          },
+          "pricing": {
+            "subtotal": 3200,
+            "total": 4000,
+            "deposit_percent": 35
+          },
+          "books_edits": {
+            "line_items": [
+              {
+                "key": "system_1_furnace_0",
+                "item_id": "400000000000000001",
+                "name": "Fixture Furnace",
+                "description": "80k BTU furnace",
+                "rate": 3200
+              }
+            ],
+            "notes": "Please review this estimate and approve through Zoho Books when ready to proceed.",
+            "terms": "Fixture proposal valid for 30 days."
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "idempotency": "tc-00000000-0000-4000-8000-000000000001",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/send-estimate",
+        "query": {},
+        "body": {
+          "estimate_id": "500000000000000001",
+          "pretty_attachment": {
+            "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+            "html": "<h1>Fixture café proposal</h1>",
+            "pdf": "valid-letter-pdf-verified-separately"
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      }
+    ]
+  },
+  "referencePdf": {
+    "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+    "bytes": 8885,
+    "declaredBytes": 8886,
+    "pages": 1,
+    "letterPage": true,
+    "html": "<h1>Fixture café proposal</h1>",
+    "mediaBoxes": [
+      [
+        0,
+        0,
+        612,
+        792
+      ]
+    ],
+    "placements": [
+      {
+        "width": 556,
+        "height": 127.76,
+        "x": 28,
+        "y": 636.24,
+        "image": "I0"
+      }
+    ]
+  },
+  "rebuiltPdf": {
+    "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+    "bytes": 8885,
+    "declaredBytes": 8886,
+    "pages": 1,
+    "letterPage": true,
+    "html": "<h1>Fixture café proposal</h1>",
+    "mediaBoxes": [
+      [
+        0,
+        0,
+        612,
+        792
+      ]
+    ],
+    "placements": [
+      {
+        "width": 556,
+        "height": 127.76,
+        "x": 28,
+        "y": 636.24,
+        "image": "I0"
+      }
+    ]
+  },
+  "pdfPages": [
+    {
+      "page": 1,
+      "dimensionsEqual": true,
+      "width": 1101,
+      "height": 253,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "mobile-send-connection-loss-reference-pdf-page-1.jpg",
+      "rebuilt": "mobile-send-connection-loss-rebuilt-pdf-page-1.jpg",
+      "referenceSha256": "bc0aecb2289be97664670cab6a4a9e2cf80d3920fe3120a93d1ae7244cac8c0c",
+      "rebuiltSha256": "bc0aecb2289be97664670cab6a4a9e2cf80d3920fe3120a93d1ae7244cac8c0c"
+    }
+  ],
+  "pdfComparison": "The actual browser-generated PDFs have identical page raster pixels, image placements, Letter media boxes, page counts, filenames and UTF-8 proposal HTML. Binary PDF identity is not expected across jsPDF versions."
+}

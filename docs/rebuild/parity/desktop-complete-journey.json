@@ -1,0 +1,649 @@
+{
+  "scenario": "complete-journey",
+  "viewport": "desktop",
+  "viewportSize": {
+    "width": 1280,
+    "height": 900
+  },
+  "browser": "156.0.8078.47",
+  "reference": "saved v0.4.8 app/dist",
+  "rebuilt": "reconstructed candidate dist",
+  "assets": {
+    "reference": {
+      "estimate-builder.js": "382be1210b9d5c3d5f1592ecc50f3c4ee813dc7a2b286ea260a6aaef30930b66",
+      "estimate-builder.css": "d08c3cdd87834e9ecd7ec198250cada6d139e32d4d8b8dcefbe47e86e65c7c04"
+    },
+    "rebuilt": {
+      "estimate-builder.js": "64ba26a6cb957db60376790e10eaa25b7a116ac3629ca6aa96c4969d5a2b4b56",
+      "estimate-builder.css": "550651b9f9babd3f1943b0fb563bb9fa3d1f3990d2d21d281401484212373f7d"
+    }
+  },
+  "screens": {
+    "customer-empty": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 900,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-customer-empty-reference.png",
+      "rebuilt": "desktop-customer-empty-rebuilt.png",
+      "referenceSha256": "b5ba21ff7eefd3601dbcc1acfb31bd9757bb1f186577be78c797dc1c3e45aef9",
+      "rebuiltSha256": "b5ba21ff7eefd3601dbcc1acfb31bd9757bb1f186577be78c797dc1c3e45aef9",
+      "domSha256": "ecacf6d2b34f158539c543aeb309647fa27cc447651134dff9125c3ade10c648"
+    },
+    "customer-selected": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 900,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-customer-selected-reference.png",
+      "rebuilt": "desktop-customer-selected-rebuilt.png",
+      "referenceSha256": "cee2a464d2a0241a68b499dc3e285a0fbcb665371e601997f9c615cad742e895",
+      "rebuiltSha256": "cee2a464d2a0241a68b499dc3e285a0fbcb665371e601997f9c615cad742e895",
+      "domSha256": "b9d5544a9c25e5e2708c0b2d9632897ebb4ab8dd6855ef7a218937d8765f67ca"
+    },
+    "equipment-drawer": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 915,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-equipment-drawer-reference.png",
+      "rebuilt": "desktop-equipment-drawer-rebuilt.png",
+      "referenceSha256": "4a579fa1654c18790ace9e12797db584198a6f5a4662bb2b71312817f6cef23e",
+      "rebuiltSha256": "4a579fa1654c18790ace9e12797db584198a6f5a4662bb2b71312817f6cef23e",
+      "domSha256": "ae25c887f630500127149708de389136b21db988eef74e5a74b7119d0bb9130a"
+    },
+    "equipment-selected": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 2364,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-equipment-selected-reference.png",
+      "rebuilt": "desktop-equipment-selected-rebuilt.png",
+      "referenceSha256": "96efa54034e4122ab226c8ef16e53f72874edca9cab6c9247ccfdd4453d90eb5",
+      "rebuiltSha256": "96efa54034e4122ab226c8ef16e53f72874edca9cab6c9247ccfdd4453d90eb5",
+      "domSha256": "6b5c6031641e03b03f18875c68911db5673c0281ffaf9c776e1249b10f16aa31"
+    },
+    "pricing-options": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 1227,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-pricing-options-reference.png",
+      "rebuilt": "desktop-pricing-options-rebuilt.png",
+      "referenceSha256": "e57b82a2e24ca3f15f17ce304bec2e620ba076659f13484f8f3509934ca23af6",
+      "rebuiltSha256": "e57b82a2e24ca3f15f17ce304bec2e620ba076659f13484f8f3509934ca23af6",
+      "domSha256": "c1d0ced50c8326eed1b3da393fe9c12e935a55948e4c417e271d09c08d2c5c14"
+    },
+    "review-polished-edited": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 1056,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-review-polished-edited-reference.png",
+      "rebuilt": "desktop-review-polished-edited-rebuilt.png",
+      "referenceSha256": "e1efa0c4956d906060a14f8fc5b867c26b8a5cfb7a9ef28a2b5652bea95363da",
+      "rebuiltSha256": "e1efa0c4956d906060a14f8fc5b867c26b8a5cfb7a9ef28a2b5652bea95363da",
+      "domSha256": "9e343762278c0f1b7d6d4cb904d729fab6ed6bec483e6ba6d6416d532409bccf"
+    },
+    "review-books-edited": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 1839,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-review-books-edited-reference.png",
+      "rebuilt": "desktop-review-books-edited-rebuilt.png",
+      "referenceSha256": "f904cfe3b83f210c1b8f967d0da799a7c3714668f46a3563d03eb7cf75d5b827",
+      "rebuiltSha256": "f904cfe3b83f210c1b8f967d0da799a7c3714668f46a3563d03eb7cf75d5b827",
+      "domSha256": "98abc02ad83454dd77a61a8abf5d4240e65eb6357a4050237c49522c37104cb5"
+    },
+    "draft-created": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 1423,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-draft-created-reference.png",
+      "rebuilt": "desktop-draft-created-rebuilt.png",
+      "referenceSha256": "cbcce3ece455e66bd63b4153cc2bf034ee37992eeabc86cbec952dba226eee7c",
+      "rebuiltSha256": "cbcce3ece455e66bd63b4153cc2bf034ee37992eeabc86cbec952dba226eee7c",
+      "domSha256": "84064486886ef12e6d5d6913da63b85c742b930df5fe280a4d2f31ac699339e7"
+    },
+    "draft-books-saved": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 2343,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-draft-books-saved-reference.png",
+      "rebuilt": "desktop-draft-books-saved-rebuilt.png",
+      "referenceSha256": "0b6379e13e518e61322054c7139b570f08655353784a7c961f8f1b3b04eea47e",
+      "rebuiltSha256": "0b6379e13e518e61322054c7139b570f08655353784a7c961f8f1b3b04eea47e",
+      "domSha256": "feafa316ae95d977171347f8b5a91eba416eb47a025202d1ee0bf43955482223"
+    },
+    "sent": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 3898,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-sent-reference.png",
+      "rebuilt": "desktop-sent-rebuilt.png",
+      "referenceSha256": "837e2129a73f0b34f4c40c6309c24653461f875a5902990c8a80ebbe22899405",
+      "rebuiltSha256": "837e2129a73f0b34f4c40c6309c24653461f875a5902990c8a80ebbe22899405",
+      "domSha256": "5264823a81d1197c4fbfa0d115ffed8e93bbdddea19c15c33da63411d82f7fbf"
+    },
+    "restart-reference-edge": {
+      "dimensionsEqual": true,
+      "width": 1280,
+      "height": 900,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-restart-reference-edge-reference.png",
+      "rebuilt": "desktop-restart-reference-edge-rebuilt.png",
+      "referenceSha256": "19f7ffd23d3b24fae22fa5cfe07b6c93555a482c08c07f255204725be1c19766",
+      "rebuiltSha256": "19f7ffd23d3b24fae22fa5cfe07b6c93555a482c08c07f255204725be1c19766",
+      "domSha256": "0b3e662ffc7f681fb6f2eee13f82a44468b9ce829516e7dbfbb2cb7f726e0d31"
+    }
+  },
+  "externalRequests": [],
+  "browserErrors": [],
+  "requestParity": true,
+  "mockedApi": {
+    "reads": [
+      {
+        "method": "GET",
+        "path": "/customers",
+        "query": {
+          "q": "Fixture",
+          "limit": "20"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/customers",
+        "query": {
+          "q": "Fixture",
+          "limit": "20"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "limit": "1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "type": "condenser",
+          "limit": "100"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "type": "evaporator_coil",
+          "limit": "100"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "type": "furnace",
+          "limit": "100"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/equipment",
+        "query": {
+          "type": "permit",
+          "limit": "100"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/send-status",
+        "query": {
+          "job_id": "fixture-job-1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/send-status",
+        "query": {
+          "job_id": "fixture-job-1"
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/templates",
+        "query": {},
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      }
+    ],
+    "mutations": [
+      {
+        "method": "POST",
+        "path": "/preview",
+        "query": {},
+        "body": {
+          "template_id": 42,
+          "customer": {
+            "zoho_account_id": "200000000000000001"
+          },
+          "systems": [
+            {
+              "system_number": 1,
+              "system_label": "Main System",
+              "equipment": {
+                "furnace": {
+                  "item_id": "400000000000000001",
+                  "description": "Fixture furnace scope — café-ready"
+                },
+                "coil": {
+                  "item_id": "400000000000000003",
+                  "description": "Matched fixture coil"
+                },
+                "permit": {
+                  "item_id": "400000000000000004",
+                  "description": "Municipality permit",
+                  "rate": 350.25
+                }
+              }
+            },
+            {
+              "system_number": 2,
+              "system_label": "Upstairs fixture",
+              "equipment": {
+                "condenser": {
+                  "item_id": "400000000000000005",
+                  "description": "Three-ton fixture condenser"
+                }
+              }
+            }
+          ],
+          "options": {
+            "warranty_parts_years": 10,
+            "warranty_labor_years": 0,
+            "special_notes": "Fixture notes — café",
+            "rebates": [
+              {
+                "name": "Fixture rebate",
+                "amount": 300
+              }
+            ],
+            "financing_requested": true,
+            "financing_term_months": 84,
+            "credit_card_fee_applies": true,
+            "financing_fee_applies": true
+          },
+          "pricing": {
+            "subtotal": 8550.25,
+            "total": 9200.5,
+            "deposit_percent": 40
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/generate",
+        "query": {},
+        "body": {
+          "template_id": 42,
+          "customer": {
+            "zoho_account_id": "200000000000000001"
+          },
+          "systems": [
+            {
+              "system_number": 1,
+              "system_label": "Main System",
+              "equipment": {
+                "furnace": {
+                  "item_id": "400000000000000001",
+                  "description": "Fixture furnace scope — café-ready"
+                },
+                "coil": {
+                  "item_id": "400000000000000003",
+                  "description": "Matched fixture coil"
+                },
+                "permit": {
+                  "item_id": "400000000000000004",
+                  "description": "Municipality permit",
+                  "rate": 350.25
+                }
+              }
+            },
+            {
+              "system_number": 2,
+              "system_label": "Upstairs fixture",
+              "equipment": {
+                "condenser": {
+                  "item_id": "400000000000000005",
+                  "description": "Three-ton fixture condenser"
+                }
+              }
+            }
+          ],
+          "options": {
+            "warranty_parts_years": 10,
+            "warranty_labor_years": 0,
+            "special_notes": "Fixture notes — café",
+            "rebates": [
+              {
+                "name": "Fixture rebate",
+                "amount": 300
+              }
+            ],
+            "financing_requested": true,
+            "financing_term_months": 84,
+            "credit_card_fee_applies": true,
+            "financing_fee_applies": true
+          },
+          "pricing": {
+            "subtotal": 8550.25,
+            "total": 9200.5,
+            "deposit_percent": 40
+          },
+          "books_edits": {
+            "line_items": [
+              {
+                "key": "system_1_furnace_0",
+                "item_id": "400000000000000001",
+                "name": "Fixture Furnace",
+                "description": "Edited Books furnace description",
+                "rate": 3200
+              },
+              {
+                "key": "system_1_coil_0",
+                "item_id": "400000000000000003",
+                "name": "Fixture Coil",
+                "description": "Matched fixture coil",
+                "rate": 900
+              },
+              {
+                "key": "system_1_permit_0",
+                "item_id": "400000000000000004",
+                "name": "Fixture Municipal Permit",
+                "description": "Municipality permit",
+                "rate": 350.25
+              },
+              {
+                "key": "system_2_condenser_0",
+                "item_id": "400000000000000005",
+                "name": "Fixture Condenser",
+                "description": "Three-ton fixture condenser",
+                "rate": 4100
+              }
+            ],
+            "notes": "Fixture approved Books notes",
+            "terms": "Fixture customer terms"
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "idempotency": "tc-00000000-0000-4000-8000-000000000001",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/update-estimate",
+        "query": {},
+        "body": {
+          "estimate_id": "500000000000000001",
+          "books_edits": {
+            "line_items": [
+              {
+                "key": "system_1_furnace_0",
+                "item_id": "400000000000000001",
+                "name": "Fixture Furnace",
+                "description": "After-draft Books wording",
+                "rate": 3200
+              },
+              {
+                "key": "system_1_coil_0",
+                "item_id": "400000000000000003",
+                "name": "Fixture Coil",
+                "description": "Matched fixture coil",
+                "rate": 900
+              },
+              {
+                "key": "system_1_permit_0",
+                "item_id": "400000000000000004",
+                "name": "Fixture Municipal Permit",
+                "description": "Municipality permit",
+                "rate": 350.25
+              },
+              {
+                "key": "system_2_condenser_0",
+                "item_id": "400000000000000005",
+                "name": "Fixture Condenser",
+                "description": "Three-ton fixture condenser",
+                "rate": 4100
+              }
+            ],
+            "notes": "These notes were saved only in the local fixture.",
+            "terms": "Fixture customer terms"
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/send-estimate",
+        "query": {},
+        "body": {
+          "estimate_id": "500000000000000001",
+          "pretty_attachment": {
+            "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+            "html": "<h1>Fixture multi-page proposal — café</h1><p>Scope item 1: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 2: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 3: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 4: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 5: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 6: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 7: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 8: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 9: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 10: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 11: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 12: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 13: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 14: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 15: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 16: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 17: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 18: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 19: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 20: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 21: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 22: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 23: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 24: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 25: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 26: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 27: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 28: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 29: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 30: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 31: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 32: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 33: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 34: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 35: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 36: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 37: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 38: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 39: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 40: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 41: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 42: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 43: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 44: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 45: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 46: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 47: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 48: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>End of synthetic proposal.</p>",
+            "pdf": "valid-letter-pdf-verified-separately"
+          }
+        },
+        "headers": {
+          "nonce": "fixture-nonce",
+          "cookie": "fixture_session=synthetic-only"
+        }
+      }
+    ]
+  },
+  "referencePdf": {
+    "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+    "bytes": 633292,
+    "declaredBytes": 633294,
+    "pages": 3,
+    "letterPage": true,
+    "html": "<h1>Fixture multi-page proposal — café</h1><p>Scope item 1: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 2: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 3: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 4: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 5: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 6: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 7: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 8: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 9: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 10: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 11: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 12: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 13: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 14: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 15: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 16: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 17: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 18: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 19: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 20: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 21: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 22: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 23: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 24: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 25: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 26: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 27: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 28: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 29: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 30: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 31: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 32: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 33: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 34: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 35: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 36: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 37: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 38: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 39: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 40: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 41: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 42: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 43: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 44: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 45: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 46: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 47: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 48: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>End of synthetic proposal.</p>",
+    "mediaBoxes": [
+      [
+        0,
+        0,
+        612,
+        792
+      ],
+      [
+        0,
+        0,
+        612,
+        792
+      ],
+      [
+        0,
+        0,
+        612,
+        792
+      ]
+    ],
+    "placements": [
+      {
+        "width": 556,
+        "height": 735.78,
+        "x": 28,
+        "y": 28.22,
+        "image": "I0"
+      },
+      {
+        "width": 556,
+        "height": 735.78,
+        "x": 28,
+        "y": 28.22,
+        "image": "I1"
+      },
+      {
+        "width": 556,
+        "height": 595.89,
+        "x": 28,
+        "y": 168.11,
+        "image": "I2"
+      }
+    ]
+  },
+  "rebuiltPdf": {
+    "filename": "Temp-Control-Proposal-Fixture-Customer.pdf",
+    "bytes": 633292,
+    "declaredBytes": 633294,
+    "pages": 3,
+    "letterPage": true,
+    "html": "<h1>Fixture multi-page proposal — café</h1><p>Scope item 1: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 2: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 3: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 4: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 5: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 6: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 7: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 8: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 9: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 10: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 11: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 12: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 13: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 14: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 15: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 16: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 17: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 18: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 19: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 20: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 21: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 22: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 23: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 24: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 25: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 26: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 27: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 28: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 29: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 30: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 31: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 32: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 33: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 34: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 35: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 36: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 37: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 38: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 39: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 40: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 41: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 42: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 43: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 44: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 45: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 46: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 47: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>Scope item 48: Synthetic fixture installation, equipment selection, customer approval, and careful verification of each documented system.</p><p>End of synthetic proposal.</p>",
+    "mediaBoxes": [
+      [
+        0,
+        0,
+        612,
+        792
+      ],
+      [
+        0,
+        0,
+        612,
+        792
+      ],
+      [
+        0,
+        0,
+        612,
+        792
+      ]
+    ],
+    "placements": [
+      {
+        "width": 556,
+        "height": 735.78,
+        "x": 28,
+        "y": 28.22,
+        "image": "I0"
+      },
+      {
+        "width": 556,
+        "height": 735.78,
+        "x": 28,
+        "y": 28.22,
+        "image": "I1"
+      },
+      {
+        "width": 556,
+        "height": 595.89,
+        "x": 28,
+        "y": 168.11,
+        "image": "I2"
+      }
+    ]
+  },
+  "pdfPages": [
+    {
+      "page": 1,
+      "dimensionsEqual": true,
+      "width": 1101,
+      "height": 1457,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-complete-journey-reference-pdf-page-1.jpg",
+      "rebuilt": "desktop-complete-journey-rebuilt-pdf-page-1.jpg",
+      "referenceSha256": "b0df75852d3f973af525ff9e973f7ad0b110c3325b38004b985c63b7b96bea6f",
+      "rebuiltSha256": "b0df75852d3f973af525ff9e973f7ad0b110c3325b38004b985c63b7b96bea6f"
+    },
+    {
+      "page": 2,
+      "dimensionsEqual": true,
+      "width": 1101,
+      "height": 1457,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-complete-journey-reference-pdf-page-2.jpg",
+      "rebuilt": "desktop-complete-journey-rebuilt-pdf-page-2.jpg",
+      "referenceSha256": "de2e4d401006391f596f0661405a19089efb0429cca09ee657293aaae110889f",
+      "rebuiltSha256": "de2e4d401006391f596f0661405a19089efb0429cca09ee657293aaae110889f"
+    },
+    {
+      "page": 3,
+      "dimensionsEqual": true,
+      "width": 1101,
+      "height": 1180,
+      "changedPixels": 0,
+      "maxChannelDifference": 0,
+      "reference": "desktop-complete-journey-reference-pdf-page-3.jpg",
+      "rebuilt": "desktop-complete-journey-rebuilt-pdf-page-3.jpg",
+      "referenceSha256": "3fcdef2b7fc357bfc4c02685239b5c096cd0eedda34d60c34c9524c780d278ee",
+      "rebuiltSha256": "3fcdef2b7fc357bfc4c02685239b5c096cd0eedda34d60c34c9524c780d278ee"
+    }
+  ],
+  "pdfComparison": "The actual browser-generated PDFs have identical page raster pixels, image placements, Letter media boxes, page counts, filenames and UTF-8 proposal HTML. Binary PDF identity is not expected across jsPDF versions."
+}

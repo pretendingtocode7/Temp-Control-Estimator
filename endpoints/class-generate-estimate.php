@@ -12,7 +12,7 @@
  *   4. Hydrate customer + equipment from Zoho.
  *   5. Render template body.
  *   6. Insert audit row as 'pending'.
- *   7. Call Estimate_Generator::generate() — which invokes the Deluge function.
+ *   7. Call Estimate_Generator::generate() — which creates a Books draft and CRM Deal.
  *   8. Update audit row to 'success' (with IDs) or 'error' (with message).
  *
  * @package TempControlEstimateBuilder
@@ -204,18 +204,20 @@ final class Generate_Estimate extends Endpoint_Base {
 		) );
 
 		return $this->ok( array(
-			'estimate_id'      => $result['estimate_id'],
-			'estimate_url'     => $result['estimate_url'],
-			'deal_id'          => $result['deal_id'],
-			'deal_url'         => $result['deal_url'],
-			'subtotal'         => $result['subtotal'],
-			'total'            => $result['total'],
-			'books_email_sent' => ! empty( $result['books_email_sent'] ),
+			'estimate_id'        => $result['estimate_id'],
+			'estimate_number'    => (string) ( $result['estimate_number'] ?? '' ),
+			'estimate_status'    => (string) ( $result['estimate_status'] ?? 'draft' ),
+			'estimate_url'       => $result['estimate_url'],
+			'deal_id'            => $result['deal_id'],
+			'deal_url'           => $result['deal_url'],
+			'subtotal'           => $result['subtotal'],
+			'total'              => $result['total'],
+			'books_email_sent'   => ! empty( $result['books_email_sent'] ),
 			'books_email_message' => (string) ( $result['books_email_message'] ?? '' ),
-			'template_id'      => (int) $post->ID,
-			'template_version' => (int) ( $template_meta['version'] ?? 0 ),
-			'idempotency_key'  => $idempotency_key,
-			'duration_ms'      => $duration_ms,
+			'template_id'        => (int) $post->ID,
+			'template_version'   => (int) ( $template_meta['version'] ?? 0 ),
+			'idempotency_key'    => $idempotency_key,
+			'duration_ms'        => $duration_ms,
 		), 201 );
 	}
 
@@ -250,9 +252,22 @@ final class Generate_Estimate extends Endpoint_Base {
 		$status = (string) ( $row['status'] ?? '' );
 
 		if ( 'success' === $status ) {
+			$estimate_id = (string) $row['zoho_estimate_id'];
+			$deal_id     = (string) $row['zoho_deal_id'];
+			$payload     = json_decode( (string) ( $row['payload'] ?? '' ), true );
+			$total       = is_array( $payload ) ? (float) ( $payload['pricing']['total'] ?? 0 ) : 0.0;
+			$subtotal    = is_array( $payload ) ? (float) ( $payload['pricing']['subtotal'] ?? 0 ) : 0.0;
+			$dc          = (string) get_option( 'tc_estimate_zoho_dc', 'com' );
 			return $this->ok( array(
-				'estimate_id'      => (string) $row['zoho_estimate_id'],
-				'deal_id'          => (string) $row['zoho_deal_id'],
+				'estimate_id'        => $estimate_id,
+				'estimate_status'    => 'draft',
+				'estimate_url'       => sprintf( 'https://books.zoho.%s/app/#/estimates/%s', $dc, rawurlencode( $estimate_id ) ),
+				'deal_id'            => $deal_id,
+				'deal_url'           => sprintf( 'https://crm.zoho.%s/crm/tab/Potentials/%s', $dc, rawurlencode( $deal_id ) ),
+				'subtotal'           => $subtotal,
+				'total'              => $total,
+				'books_email_sent'   => false,
+				'books_email_message' => __( 'Estimate created as a draft. No customer email was sent.', 'tc-estimate' ),
 				'template_id'      => (int) $row['template_id'],
 				'template_version' => (int) $row['template_version'],
 				'idempotency_key'  => (string) $row['idempotency_key'],

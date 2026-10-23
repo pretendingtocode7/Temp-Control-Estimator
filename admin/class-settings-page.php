@@ -16,6 +16,7 @@ use TempControl\Estimate\Security;
 use TempControl\Estimate\Zoho_API;
 use TempControl\Estimate\Zoho_Cache;
 use TempControl\Estimate\Capabilities;
+use TempControl\Estimate\Equipment_Catalog;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,9 +28,6 @@ final class Settings_Page {
 	private const OPT_CLIENT_SECRET = 'tc_estimate_zoho_client_secret';
 	private const OPT_ORG_ID        = 'tc_estimate_zoho_org_id';
 	private const OPT_DC            = 'tc_estimate_zoho_dc';
-	private const OPT_CRM_EQUIPMENT_MODULE = 'tc_estimate_crm_equipment_module';
-	private const OPT_BOOKS_AGG_ITEM_ID    = 'tc_estimate_books_aggregate_item_id';
-	private const OPT_BOOKS_AGG_ITEM_NAME  = 'tc_estimate_books_aggregate_item_name';
 
 	public static function instance(): Settings_Page {
 		if ( null === self::$instance ) {
@@ -42,7 +40,7 @@ final class Settings_Page {
 		add_action( 'admin_post_tc_estimate_save_settings', array( $this, 'handle_save' ) );
 		add_action( 'admin_post_tc_estimate_refresh_catalog', array( $this, 'handle_refresh_catalog' ) );
 		add_action( 'admin_post_tc_estimate_test_zoho', array( $this, 'handle_test_zoho' ) );
-		add_action( 'admin_post_tc_estimate_test_crm_equipment', array( $this, 'handle_test_crm_equipment' ) );
+		add_action( 'admin_post_tc_estimate_test_books_items', array( $this, 'handle_test_books_items' ) );
 		add_action( 'admin_post_tc_estimate_reinstall_caps', array( $this, 'handle_reinstall_caps' ) );
 		// Inline template management — bypass the CPT edit screen.
 		add_action( 'admin_post_tc_estimate_save_template', array( $this, 'handle_save_template' ) );
@@ -230,9 +228,6 @@ final class Settings_Page {
 		$has_refresh   = '' !== Security::instance()->get_zoho_refresh_token();
 		$org_id        = (string) get_option( self::OPT_ORG_ID, '' );
 		$dc            = (string) get_option( self::OPT_DC, 'com' );
-		$crm_equipment_module = (string) get_option( self::OPT_CRM_EQUIPMENT_MODULE, 'Products' );
-		$books_aggregate_item_id = (string) get_option( self::OPT_BOOKS_AGG_ITEM_ID, '' );
-		$books_aggregate_item_name = (string) get_option( self::OPT_BOOKS_AGG_ITEM_NAME, 'HVAC Installation Package' );
 		$webhook_url   = rest_url( TC_ESTIMATE_REST_NS . '/webhook/accepted' );
 		$webhook_secret = Security::instance()->get_webhook_secret();
 
@@ -255,20 +250,10 @@ final class Settings_Page {
 		$refresh_token = isset( $_POST['refresh_token'] ) ? (string) wp_unslash( $_POST['refresh_token'] ) : '';
 		$org_id        = isset( $_POST['org_id'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['org_id'] ) ) : '';
 		$dc            = isset( $_POST['dc'] ) ? sanitize_key( (string) wp_unslash( $_POST['dc'] ) ) : 'com';
-		$crm_equipment_module = isset( $_POST['crm_equipment_module'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['crm_equipment_module'] ) ) : 'Products';
-		$books_aggregate_item_id = isset( $_POST['books_aggregate_item_id'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['books_aggregate_item_id'] ) ) : '';
-		$books_aggregate_item_name = isset( $_POST['books_aggregate_item_name'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['books_aggregate_item_name'] ) ) : 'HVAC Installation Package';
 		$allowed_dc    = array( 'com', 'eu', 'in', 'com.au', 'com.cn', 'jp' );
 		if ( ! in_array( $dc, $allowed_dc, true ) ) {
 			$dc = 'com';
 		}
-		if ( '' === $crm_equipment_module || ! preg_match( '/^[A-Za-z0-9_]+$/', $crm_equipment_module ) ) {
-			$crm_equipment_module = 'Products';
-		}
-		if ( '' === $books_aggregate_item_name ) {
-			$books_aggregate_item_name = 'HVAC Installation Package';
-		}
-
 		update_option( self::OPT_CLIENT_ID, $client_id, false );
 		if ( '' !== $client_secret ) {
 			update_option( self::OPT_CLIENT_SECRET, $client_secret, false );
@@ -279,9 +264,7 @@ final class Settings_Page {
 		}
 		update_option( self::OPT_ORG_ID, $org_id, false );
 		update_option( self::OPT_DC, $dc, false );
-		update_option( self::OPT_CRM_EQUIPMENT_MODULE, $crm_equipment_module, false );
-		update_option( self::OPT_BOOKS_AGG_ITEM_ID, $books_aggregate_item_id, false );
-		update_option( self::OPT_BOOKS_AGG_ITEM_NAME, $books_aggregate_item_name, false );
+		Zoho_Cache::instance()->flush_all();
 
 		$saved_client_id = (string) get_option( self::OPT_CLIENT_ID, '' );
 		$saved_secret    = '' !== (string) get_option( self::OPT_CLIENT_SECRET, '' );
@@ -338,54 +321,33 @@ final class Settings_Page {
 		exit;
 	}
 
-	public function handle_test_crm_equipment(): void {
+	public function handle_test_books_items(): void {
 		if ( ! Capabilities::instance()->current_user_can_admin() ) {
 			wp_die( esc_html__( 'Insufficient permissions.', 'tc-estimate' ) );
 		}
-		check_admin_referer( 'tc_estimate_test_crm_equipment' );
+		check_admin_referer( 'tc_estimate_test_books_items' );
 
-		$module = (string) get_option( self::OPT_CRM_EQUIPMENT_MODULE, 'Products' );
-		if ( '' === $module || ! preg_match( '/^[A-Za-z0-9_]+$/', $module ) ) {
-			$module = 'Products';
-		}
-
-		$result = Zoho_API::instance()->get(
-			Zoho_API::SERVICE_CRM,
-			'/' . rawurlencode( $module ),
-			array(
-				'per_page' => 1,
-				'fields'   => implode( ',', array(
-					'id',
-					'Estimate_Builder_Part_Info',
-					'Equipment_Type',
-					'Brand',
-					'Model',
-					'Sales_Price',
-					'JS_Part_Number',
-					'Mfg_Part_Number',
-				) ),
-			)
-		);
+		Zoho_Cache::instance()->flush_all();
+		$result = Equipment_Catalog::instance()->search( array( 'limit' => 100 ) );
 
 		if ( is_wp_error( $result ) ) {
 			$this->flash(
 				'error',
-				sprintf(
-					__( 'CRM equipment module test failed for %1$s: %2$s', 'tc-estimate' ),
-					$module,
-					$result->get_error_message()
-				)
+				sprintf( __( 'Zoho Books item test failed: %s', 'tc-estimate' ), $result->get_error_message() )
 			);
 		} else {
-			$count = isset( $result['data'] ) && is_array( $result['data'] ) ? count( $result['data'] ) : 0;
-			$this->flash(
-				'success',
-				sprintf(
-					__( 'CRM equipment module %1$s is reachable. Sample records returned: %2$d.', 'tc-estimate' ),
-					$module,
-					$count
-				)
-			);
+			$count = count( $result );
+			if ( 0 === $count ) {
+				$this->flash( 'error', __( 'Zoho Books Items are reachable, but no active Items have cf_for_estimate checked.', 'tc-estimate' ) );
+			} else {
+				$this->flash(
+					'success',
+					sprintf(
+						__( 'Zoho Books Items are reachable. Eligible cf_for_estimate items returned (up to 100): %d.', 'tc-estimate' ),
+						$count
+					)
+				);
+			}
 		}
 
 		wp_safe_redirect( $this->settings_redirect_url() );

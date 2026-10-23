@@ -26,26 +26,9 @@
 {{#systems}}
 <h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
 <ul style="margin-top:4px;">
-  {{#furnace}}
-  <li><strong>Furnace</strong> — {{brand}} Model {{model}}{{#afue}} ({{afue}}% AFUE{{/afue}}{{#btu_output}}, {{btu_output}} BTU output{{/btu_output}}{{#stages}}, {{stages}} stage{{/stages}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/furnace}}
-  {{#condenser}}
-  <li><strong>Condenser</strong> — {{brand}} Model {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}}{{/refrigerant}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/condenser}}
-  {{#coil}}
-  <li><strong>Evaporator Coil</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/coil}}
-  {{#air_handler}}
-  <li><strong>Air Handler</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/air_handler}}
-  {{#thermostat}}
-  <li><strong>Thermostat</strong> — {{brand}} Model {{model}}</li>
-  {{/thermostat}}
-  {{#has_other}}
-  {{#other}}
-  <li><strong>{{slot}}</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/other}}
-  {{/has_other}}
+  {{#items}}
+  <li><strong>{{slot_label}}</strong> — {{display_name}}{{#short_description}} — {{short_description}}{{/short_description}}{{#is_permit}} — {{rate_formatted}}{{/is_permit}}</li>
+  {{/items}}
 </ul>
 {{/systems}}
 
@@ -64,11 +47,14 @@
 <p>{{special_notes}}</p>
 {{/special_notes}}
 
-<h3>Warranty</h3>
+{{#has_proposal_notes}}
+<h3>Proposal Notes</h3>
 <ul>
-  <li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty</li>
-  <li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>
+  {{#proposal_notes}}
+  <li>{{text}}</li>
+  {{/proposal_notes}}
 </ul>
+{{/has_proposal_notes}}
 
 {{#has_rebates}}
 <h3>Rebates and Incentives</h3>
@@ -96,4 +82,4 @@
 {{/has_financing}}
 
 <hr style="margin-top:24px;" />
-<p style="font-size:12px;color:#646970;">This proposal is valid for 30 days from the date above. Prices are subject to equipment availability and do not include any required permits beyond those standard for NJ residential HVAC work.</p>
+<p style="font-size:12px;color:#646970;">This proposal is valid for 30 days from the date above. Prices are subject to equipment availability. Permit fees are included only when listed as a proposal line item.</p>

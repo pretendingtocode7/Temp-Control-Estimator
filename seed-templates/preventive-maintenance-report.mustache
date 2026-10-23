@@ -21,18 +21,9 @@
 {{#systems}}
 <h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
 <ul style="margin-top:4px;">
-  {{#furnace}}
-  <li><strong>Furnace</strong> — {{brand}} {{model}}{{#afue}} ({{afue}}% AFUE{{/afue}})</li>
-  {{/furnace}}
-  {{#condenser}}
-  <li><strong>Condenser</strong> — {{brand}} {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}})</li>
-  {{/condenser}}
-  {{#coil}}
-  <li><strong>Evaporator Coil</strong> — {{brand}} {{model}}</li>
-  {{/coil}}
-  {{#air_handler}}
-  <li><strong>Air Handler</strong> — {{brand}} {{model}}</li>
-  {{/air_handler}}
+  {{#items}}
+  <li><strong>{{slot_label}}</strong> — {{display_name}}{{#short_description}} — {{short_description}}{{/short_description}}{{#is_permit}} — {{rate_formatted}}{{/is_permit}}</li>
+  {{/items}}
 </ul>
 {{/systems}}
 
@@ -72,6 +63,15 @@
 <h3>Findings &amp; Recommendations</h3>
 <p>{{special_notes}}</p>
 {{/special_notes}}
+
+{{#has_proposal_notes}}
+<h3>Proposal Notes</h3>
+<ul>
+  {{#proposal_notes}}
+  <li>{{text}}</li>
+  {{/proposal_notes}}
+</ul>
+{{/has_proposal_notes}}
 
 <h3>System Status</h3>
 <p>All systems serviced are operating within manufacturer specifications at the time of this visit. Your next scheduled maintenance visit will be advised per your maintenance plan terms.</p>

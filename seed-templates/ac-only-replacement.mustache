@@ -26,15 +26,9 @@
 {{#systems}}
 <h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>
 <ul style="margin-top:4px;">
-  {{#condenser}}
-  <li><strong>Condenser</strong> — {{brand}} Model {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}} refrigerant{{/refrigerant}}{{#stages}}, {{stages}} stage{{/stages}}){{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/condenser}}
-  {{#coil}}
-  <li><strong>Evaporator Coil</strong> — {{brand}} Model {{model}}{{#short_description}} — {{short_description}}{{/short_description}}</li>
-  {{/coil}}
-  {{#thermostat}}
-  <li><strong>Thermostat</strong> — {{brand}} Model {{model}}</li>
-  {{/thermostat}}
+  {{#items}}
+  <li><strong>{{slot_label}}</strong> — {{display_name}}{{#short_description}} — {{short_description}}{{/short_description}}{{#is_permit}} — {{rate_formatted}}{{/is_permit}}</li>
+  {{/items}}
 </ul>
 {{/systems}}
 
@@ -54,11 +48,14 @@
 <p>{{special_notes}}</p>
 {{/special_notes}}
 
-<h3>Warranty</h3>
+{{#has_proposal_notes}}
+<h3>Proposal Notes</h3>
 <ul>
-  <li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty (new AC equipment)</li>
-  <li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>
+  {{#proposal_notes}}
+  <li>{{text}}</li>
+  {{/proposal_notes}}
 </ul>
+{{/has_proposal_notes}}
 
 {{#has_rebates}}
 <h3>Rebates and Incentives</h3>

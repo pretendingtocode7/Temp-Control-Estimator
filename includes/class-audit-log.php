@@ -149,6 +149,28 @@ final class Audit_Log {
 	}
 
 	/**
+	 * Find the latest action for an estimate and user. Used to make the explicit
+	 * customer-email step retry-safe without allowing arbitrary estimate IDs.
+	 */
+	public function find_by_estimate_action( string $estimate_id, string $action, int $user_id ): ?array {
+		if ( '' === $estimate_id || '' === $action || $user_id <= 0 ) {
+			return null;
+		}
+
+		global $wpdb;
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM {$this->table()} WHERE zoho_estimate_id = %s AND action = %s AND user_id = %d ORDER BY id DESC LIMIT 1",
+				$estimate_id,
+				$action,
+				$user_id
+			),
+			ARRAY_A
+		);
+		return $row ?: null;
+	}
+
+	/**
 	 * List recent entries, optionally filtered by status and date.
 	 *
 	 * @param array{status?:string, since?:string, limit?:int} $args

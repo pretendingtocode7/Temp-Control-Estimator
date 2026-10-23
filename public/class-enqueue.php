@@ -67,8 +67,8 @@ final class Enqueue {
 	}
 
 	/**
-	 * Mark the bundle script tag with a data attribute so the SW registration helper
-	 * can locate it and derive the service-worker.js URL without hard-coding paths.
+	 * Mark the bundle so the SW registration helper can locate it and derive the
+	 * service-worker.js URL without hard-coding paths.
 	 *
 	 * @param string $tag    Generated HTML for the script tag.
 	 * @param string $handle Script handle.
@@ -77,7 +77,7 @@ final class Enqueue {
 		if ( 'tc-estimate-builder' !== $handle ) {
 			return $tag;
 		}
-		// Insert data-tc-estimate-bundle after <script.
+
 		return (string) preg_replace( '/^<script\b/', '<script data-tc-estimate-bundle', $tag, 1 );
 	}
 

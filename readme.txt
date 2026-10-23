@@ -4,14 +4,14 @@ Tags: hvac, estimates, zoho, crm, field-service
 Requires at least: 6.4
 Tested up to: 6.5
 Requires PHP: 8.1
-Stable tag: 0.2.38
+Stable tag: 0.4.8
 License: Proprietary
 
 Mobile-first estimate builder for Temp Control HVAC field techs. Generates Books estimates + CRM Deals from Zoho catalog data.
 
 == Description ==
 
-A WordPress plugin that gives Temp Control field techs a mobile-first estimate builder. Techs pick a customer, pick a proposal template, pick equipment from a Zoho CRM catalog module, and one tap generates a Books estimate for customer sign-off plus a CRM Deal for lifecycle tracking.
+A WordPress plugin that gives Temp Control field techs a mobile-first estimate builder. Techs pick a customer, pick a proposal template, and select eligible Zoho Books Items. The builder creates a draft Books estimate plus a CRM Deal, then lets the technician preview the actual estimate before explicitly emailing it to the customer.
 
 **Phase 1: office-facing foundation (shipped in 0.1.0)**
 * Plugin scaffold + Mustache-based template rendering
@@ -24,10 +24,13 @@ A WordPress plugin that gives Temp Control field techs a mobile-first estimate b
 
 **Phase 2: field-tech builder (this release, 0.2.0)**
 * React PWA that drops into any page via [tc_estimate_builder]
-* Five-step mobile wizard: Customer → Template → Equipment → Pricing → Review → Success
+* Five-step mobile wizard: Customer → Template → Equipment → Pricing → Review → Draft/Send
 * /generate endpoint with Idempotency-Key header, audit-log write-before / update-after
-* tc_generate_estimate Deluge function — atomic Books Estimate + CRM Deal creation, voids the estimate if the Deal insert fails
+* Direct Books draft + CRM Deal creation with rollback if the Deal insert fails
 * Service worker for offline catalog browsing (network-first with 4s timeout, cache fallback; customer search and mutations stay online-only for privacy and correctness)
+* Books Items only: active Items must have cf_for_estimate checked to appear or generate
+* Editable customer-facing description for every selected Item
+* Draft-first workflow with proposal preview, actual Books estimate preview, and explicit Send action
 * Zoho Deal links surfaced in the admin audit log
 
 **Phase 3: lifecycle automation (planned)**
@@ -44,14 +47,13 @@ A WordPress plugin that gives Temp Control field techs a mobile-first estimate b
 5. Activate through the WordPress Plugins menu
 6. Go to Estimate Builder → Settings and enter Zoho Client ID, Client Secret, Refresh Token, Org ID, DC
 7. Click "Test Zoho Connection" to verify OAuth
-8. Create the Deluge function tc_generate_estimate in Zoho CRM (see deluge/README.md for install steps and required custom fields)
-9. Add [tc_estimate_builder] to a page and assign the "Technician" role (or an Administrator) to the techs who should use it
+8. Add [tc_estimate_builder] to a page and assign the "Technician" role (or an Administrator) to the techs who should use it
 
 == Frequently Asked Questions ==
 
 = What Zoho scopes does the refresh token need? =
 
-ZohoCRM.modules.ALL, ZohoCRM.functions.execute.CREATE, and ZohoBooks.fullaccess.all. The Deluge function additionally requires a CRM connection named `zbooks` with `ZohoBooks.estimates.CREATE` and `ZohoBooks.estimates.UPDATE`.
+ZohoCRM.modules.ALL and ZohoBooks.fullaccess.all.
 
 = Where is the refresh token stored? =
 
@@ -63,13 +65,64 @@ The zip ships with three Mustache templates in seed-templates/. Create three est
 
 = What happens if the CRM Deal creation fails after the Books estimate is created? =
 
-The Deluge function rolls back by calling Books `/estimates/{id}/status/void` on the orphaned estimate. The API response carries both the original error and the rollback outcome, and the audit log captures the full state. The idempotency key is preserved so the tech can retry with a fresh key.
+The plugin deletes the new Books draft through the Books API and returns the original CRM error. The audit log captures the failure, and the idempotency key is preserved so the tech can retry with a fresh key.
 
 = What works offline? =
 
 The React shell, previously-viewed equipment lists, and template lists. Customer search, preview, and generate all require a connection — those are the calls that need fresh Zoho state or can't be safely replayed from a cache.
 
 == Changelog ==
+
+= 0.4.8 =
+* Automatically uses one proposal layout instead of asking technicians to choose a template.
+* Encodes the polished email body so security filtering cannot remove it in transit.
+* Allows the PDF and approval link to send even if inline proposal HTML is unavailable.
+* Preloads the Books product catalog and caches it for the workday to reduce picker delays.
+
+= 0.4.7 =
+* Changed: Send website email as info@tempcontrolnj.com with the Temp Control Heating & Air Conditioning display name and reply-to address.
+* Added: Include the complete polished proposal directly in the branded HTML email body as well as attaching the PDF.
+* Added: Display both an approval button and its plain customer-review URL when Zoho Books provides the public link.
+* Fixed: Preserve a .pdf extension on WordPress's temporary attachment path so mail clients recognize and open the polished proposal reliably.
+
+= 0.4.6 =
+* Changed: Send the branded Temp Control HTML email through WordPress with the polished proposal PDF attached; Zoho Books no longer composes or sends the customer email.
+* Changed: The Books email template is no longer required. Books remains the draft/review system and is marked sent after the website email succeeds.
+
+= 0.4.5 =
+* Fixed: If Zoho Books returns an empty estimate email body without an explicit template ID, retry the available estimate email templates (selected/default first) before stopping with an actionable settings message.
+
+= 0.4.4 =
+* Fixed: Queue the polished Books email in WP-Cron so Cloudflare does not hold the browser request open during Zoho's multipart PDF upload.
+* Added: Live send-status polling with clear queued, processing, sent, and Zoho error messages.
+* Improved: Temporary proposal files are randomized, permission-restricted, deleted after processing, and protected by replay and worker locks.
+
+= 0.4.3 =
+* Added: Separate editable polished-proposal and Zoho Books versions on both review screens.
+* Added: Save edited Books line descriptions, customer notes, and terms back to an unsent draft before emailing.
+* Fixed: Compress polished proposal PDFs and allow a longer Books multipart upload window to prevent gateway failures while attaching the proposal.
+* Improved: Non-JSON gateway errors now show useful server response details instead of only an HTTP status.
+
+= 0.4.2 =
+* Fixed: Build the estimate builder as a self-contained classic browser script so WordPress or optimization plugins cannot break startup by removing the ES-module script type.
+
+= 0.4.1 =
+* Fixed: Load the production estimate-builder bundle as an ES module so the polished-PDF dependency does not prevent the builder from starting.
+
+= 0.4.0 =
+* Fixed: Estimate creation now calls Zoho Books directly with send=false, verifies draft status, and never invokes an older installed Deluge function that may email automatically.
+* Added: Explicit Send generates the polished proposal preview as a PDF attachment and sends it through the Books estimate email workflow using Books' configured customer review/accept content.
+* Added: Separate proposal-note checkboxes for 10-year parts warranty, 10-year labor warranty, credit-card fees, and financing fees. Selected notes also appear in Books estimate terms.
+* Added: Permit is an Item category. An eligible Books permit Item can be selected and its price changed for the municipality/project without changing the source Item.
+* Improved: Every selected Item has a prominent editable estimate description, and the edited wording is used on the Books line and customer proposal.
+* Improved: Saved legacy templates automatically receive selected proposal notes and permit details when they do not contain the newer template tokens.
+
+= 0.3.0 =
+* Changed: Zoho Books Items are now the only estimate catalog source; active Items must have cf_for_estimate checked.
+* Changed: Selected Books Items are used as the estimate line items instead of one aggregate placeholder Item.
+* Added: Technicians can edit each selected Item description without changing the source Item in Books.
+* Added: Estimate creation no longer emails automatically. The review screen previews the proposal, and the completion screen opens the actual Books estimate before an explicit Send action.
+* Added: Retry-safe /send-estimate endpoint restricted to estimates generated by the current user.
 
 = 0.2.38 =
 * Improved: Cleans up the Books estimate layout by keeping the main estimate line concise and making the Annexure a compact proposal detail page.

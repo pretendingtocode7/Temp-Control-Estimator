@@ -66,6 +66,8 @@ final class Plugin {
 			'endpoints/class-preview-estimate.php',
 			'endpoints/class-deluge-payload.php',
 			'endpoints/class-generate-estimate.php',
+			'endpoints/class-update-estimate.php',
+			'endpoints/class-send-estimate.php',
 			'endpoints/class-acceptance-webhook.php',
 
 			// Admin.
@@ -123,6 +125,16 @@ final class Plugin {
 
 		// REST routes — Rest_Controller itself hooks into rest_api_init internally.
 		Rest_Controller::instance()->register();
+
+		// The polished PDF and HTML are uploaded during the REST request. The website
+		// sends the branded message in WP-Cron so Cloudflare does not hold the browser
+		// request open until the origin times out.
+		add_action(
+			'tc_estimate_process_send',
+			array( Endpoints\Send_Estimate::instance(), 'process_queued_send' ),
+			10,
+			1
+		);
 
 		// Admin UI.
 		if ( is_admin() ) {

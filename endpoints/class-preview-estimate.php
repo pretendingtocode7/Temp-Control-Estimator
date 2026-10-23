@@ -16,6 +16,7 @@ namespace TempControl\Estimate\Endpoints;
 
 use TempControl\Estimate\Customer_Search;
 use TempControl\Estimate\Equipment_Catalog;
+use TempControl\Estimate\Estimate_Generator;
 use TempControl\Estimate\Rate_Limiter;
 use TempControl\Estimate\Security;
 use TempControl\Estimate\Template_CPT;
@@ -95,11 +96,14 @@ final class Preview_Estimate extends Endpoint_Base {
 		$catalog_by_id = array();
 		foreach ( $item_ids as $id ) {
 			$item = Equipment_Catalog::instance()->get_item( $id );
-			if ( ! is_wp_error( $item ) ) {
-				$catalog_by_id[ $id ] = $item;
+			if ( is_wp_error( $item ) ) {
+				return $this->fail( new WP_Error(
+					'tc_estimate_item_missing',
+					sprintf( __( 'Estimate item %s could not be loaded: %s', 'tc-estimate' ), $id, $item->get_error_message() ),
+					array( 'status' => 400 )
+				) );
 			}
-			// If the item fetch fails we simply skip it — the template will render without that slot filled.
-			// /generate treats missing items as a hard error.
+			$catalog_by_id[ $id ] = $item;
 		}
 
 		// --- Build view + render ---
@@ -117,6 +121,7 @@ final class Preview_Estimate extends Endpoint_Base {
 
 		return $this->ok( array(
 			'html'             => $rendered,
+			'books_preview'    => Estimate_Generator::instance()->build_books_preview( $view, $customer, $template_meta ),
 			'view'             => $view,
 			'template_id'      => $template_id,
 			'template_version' => (int) $template_meta['version'],

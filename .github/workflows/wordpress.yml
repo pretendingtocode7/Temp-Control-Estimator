@@ -1,0 +1,96 @@
+name: Check and deploy estimator
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: estimator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.1'
+          coverage: none
+      - name: Check PHP syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find admin includes endpoints public seed-templates tests -type f -name '*.php' -print0 |
+            xargs -0 -r -n1 php -l
+          php -l temp-control-estimate-builder.php
+          php -l uninstall.php
+      - name: Run estimate and packaging tests
+        run: |
+          php tests/smoke.php
+          python3 -m unittest discover -s tests -p test_packaging.py
+      - name: Package checked-in production assets
+        run: python3 scripts/package_plugin.py --output "${RUNNER_TEMP}/plugin-package"
+      - name: Keep installable plugin ZIP
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: temp-control-estimate-builder-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/plugin-package/temp-control-estimate-builder.zip
+            ${{ runner.temp }}/plugin-package/package.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    needs: validate
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.ESTIMATOR_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: wordpress-production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify target configuration
+        env:
+          WPE_ENV: ${{ vars.WPE_ENV }}
+          DEPLOY_KEY: ${{ secrets.WPE_SSHG_KEY_PRIVATE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WPE_ENV" =~ ^[a-z0-9-]+$ ]] || { echo "::error::Set the WP Engine environment name in WPE_ENV."; exit 1; }
+          [[ -n "$DEPLOY_KEY" ]] || { echo "::error::Set WPE_SSHG_KEY_PRIVATE in the wordpress-production environment."; exit 1; }
+      - name: Package this exact tested commit
+        run: python3 scripts/package_plugin.py --output "${RUNNER_TEMP}/plugin-package"
+      - name: Prevent deployment of the old repository baseline
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          metadata = json.loads((Path(os.environ["RUNNER_TEMP"]) / "plugin-package/package.json").read_text())
+          if tuple(map(int, metadata["version"].split("."))) < (0, 4, 8):
+              raise SystemExit("Import the current 0.4.8 or newer plugin source before enabling deployment.")
+          PY
+      - name: Stage only packaged plugin files
+        run: cp -R "${RUNNER_TEMP}/plugin-package/temp-control-estimate-builder" deploy-plugin
+      - name: Deploy estimator to WP Engine
+        uses: wpengine/github-action-wpe-site-deploy@7bdbfb62eb657ae92afb91cb889d9c3fb36ef6c0 # v3
+        with:
+          WPE_SSHG_KEY_PRIVATE: ${{ secrets.WPE_SSHG_KEY_PRIVATE }}
+          WPE_ENV: ${{ vars.WPE_ENV }}
+          SRC_PATH: deploy-plugin/
+          REMOTE_PATH: wp-content/plugins/temp-control-estimate-builder/
+          FLAGS: '-azvr --delay-updates --delete-after'
+          CACHE_CLEAR: true

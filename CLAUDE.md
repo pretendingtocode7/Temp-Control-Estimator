@@ -1,10 +1,14 @@
 # Temp Control Estimate Builder — Claude Code Context
 
-The current runtime is the saved v0.4.8 installer. Its editable frontend source
-has not been recovered; do not rebuild or replace its bundled interface from
-the older v0.2.38/v0.3.0 sources. See `docs/releases/v0.4.8-maintenance.md` for
-the search evidence and current test results. Phase descriptions below retain
-historical context and are not a complete description of the v0.4.8 runtime.
+The current runtime is the saved v0.4.8 installer. Its original editable frontend
+source has not been recovered. The separately authorized reconstruction lives
+in `app/reconstruction/`; its provenance, builds, offline tests and staging
+limits are documented in `docs/rebuild/README.md`. Candidate output stays in
+`app/reconstruction/dist/`; do not overwrite the exact `app/dist/` assets or
+installer ZIP, or substitute older v0.2.38/v0.3.0 code. See
+`docs/releases/v0.4.8-maintenance.md` for recovery evidence and PHP test results.
+Phase descriptions below retain historical context and are not a complete
+description of the v0.4.8 runtime.
 
 ## What this is
 

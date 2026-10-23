@@ -80,7 +80,7 @@ describe("WordPress bootstrap compatibility", () => {
     await load();
     expect(register).toHaveBeenCalledWith(
       "/custom/plugin/app/dist/service-worker.js",
-      { scope: "/" },
+      { scope: "/", updateViaCache: "none" },
     );
   });
   it("keeps the fallback worker URL and registration failures non-fatal", async () => {
@@ -96,11 +96,35 @@ describe("WordPress bootstrap compatibility", () => {
     await Promise.resolve();
     expect(register).toHaveBeenCalledWith(
       "/wp-content/plugins/temp-control-estimate-builder/app/dist/service-worker.js",
-      { scope: "/" },
+      { scope: "/", updateViaCache: "none" },
     );
     expect(warning).toHaveBeenCalledWith(
       "[tc-estimate] service worker registration skipped:",
       "Synthetic header unavailable",
     );
   });
+  it.each([
+    ["/?tc_estimate_sw=1&ver=0.4.10", "/estimate-builder/"],
+    ["/subsite/?tc_estimate_sw=1&ver=0.4.10", "/subsite/estimate-builder/"],
+  ])(
+    "uses the versioned WordPress worker endpoint and estimator page scope: %s",
+    async (workerUrl, scope) => {
+      const script = document.createElement("script");
+      script.src = "/custom/plugin/app/dist/estimate-builder.js?ver=0.4.10";
+      script.dataset.tcEstimateBundle = "";
+      script.dataset.tcEstimateWorkerUrl = workerUrl;
+      script.dataset.tcEstimateWorkerScope = scope;
+      document.body.appendChild(script);
+      const register = vi.fn().mockResolvedValue({ addEventListener: vi.fn() });
+      vi.stubGlobal("navigator", { serviceWorker: { register } });
+      const event = vi.spyOn(window, "addEventListener");
+      main.registerServiceWorker();
+      const load = event.mock.calls.find(([name]) => name === "load")[1];
+      await load();
+      expect(register).toHaveBeenCalledExactlyOnceWith(workerUrl, {
+        scope,
+        updateViaCache: "none",
+      });
+    },
+  );
 });

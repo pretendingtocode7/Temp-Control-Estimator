@@ -12,16 +12,19 @@ export function registerServiceWorker() {
       (candidate) =>
         candidate.src && candidate.src.includes("estimate-builder.js"),
     );
-  const workerUrl = script?.src
+  const legacyWorkerUrl = script?.src
     ? new URL(script.src, window.location.origin).pathname.replace(
         /estimate-builder\.js(\?.*)?$/,
         "service-worker.js",
       )
     : "/wp-content/plugins/temp-control-estimate-builder/app/dist/service-worker.js";
-  // Retain the original load-event timing and root scope; staging must supply the header.
+  // WordPress serves the fixed worker through its own versioned endpoint, so
+  // static-file/CDN handling cannot strip the required scope and cache headers.
+  const workerUrl = script?.dataset.tcEstimateWorkerUrl || legacyWorkerUrl;
+  const workerScope = script?.dataset.tcEstimateWorkerScope || "/";
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register(workerUrl, { scope: "/" })
+      .register(workerUrl, { scope: workerScope, updateViaCache: "none" })
       .then((registration) => {
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;

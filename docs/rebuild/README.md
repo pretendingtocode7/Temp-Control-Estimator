@@ -8,8 +8,11 @@ The candidate lives in `app/reconstruction/`. Its build writes only
 `app/reconstruction/dist/`; WordPress still enqueues the unchanged
 `app/dist/` reference. The exact saved installer and all 45 runtime files are
 recorded in [reference-manifest.json](reference-manifest.json), and every
-candidate build verifies their hashes first. No PHP endpoint, live website,
-credential or installer content is changed by this reconstruction.
+candidate build verifies their hashes first. The reference and installer stay
+unchanged when release packaging overlays the rebuilt assets and the explicit
+service-worker delivery override into a separate installable tree. See the
+[v0.4.10 worker correction and packaging instructions](service-worker-fix.md).
+Running the development build itself does not modify a website or credentials.
 
 ## Reproducible development setup
 

@@ -2,9 +2,8 @@
 /**
  * Tests for the Mustache token renderer and payload-view builder.
  *
- * This is the Phase 1 success gate: prove that Option 3 tokens (loop blocks) handle
- * both a single-system Brian-Balson-style proposal and a two-system Michael-Clemente-style
- * proposal from a single template.
+ * Proves that loop blocks handle synthetic single-system and multi-system
+ * proposals from one template.
  *
  * Run standalone:
  *   cd temp-control-estimate-builder && composer install && ./vendor/bin/phpunit -c tests/phpunit.xml
@@ -13,6 +12,9 @@
  */
 
 declare( strict_types=1 );
+
+// Customer fixtures and assertions below are synthetic: reserved .test email
+// addresses, 555-0100 phone numbers, Example Street/ExampleCity and ZIP 00000.
 
 namespace TempControl\Estimate\Tests;
 
@@ -32,8 +34,8 @@ final class TokenRendererTest extends TestCase {
 	// ----- Rendering -----
 
 	public function test_simple_scalar_substitution(): void {
-		$result = $this->renderer->render( 'Hello {{name}}', array( 'name' => 'Jessica' ) );
-		$this->assertSame( 'Hello Jessica', $result );
+		$result = $this->renderer->render( 'Hello {{name}}', array( 'name' => 'Fixture' ) );
+		$this->assertSame( 'Hello Fixture', $result );
 	}
 
 	public function test_html_escaping_by_default(): void {
@@ -45,9 +47,9 @@ final class TokenRendererTest extends TestCase {
 	public function test_nested_dot_access(): void {
 		$result = $this->renderer->render(
 			'{{customer.name}} at {{customer.address.city}}',
-			array( 'customer' => array( 'name' => 'Test Co', 'address' => array( 'city' => 'Edison' ) ) )
+			array( 'customer' => array( 'name' => 'Fixture Company', 'address' => array( 'city' => 'ExampleCity' ) ) )
 		);
-		$this->assertSame( 'Test Co at Edison', $result );
+		$this->assertSame( 'Fixture Company at ExampleCity', $result );
 	}
 
 	public function test_each_loop(): void {
@@ -72,13 +74,13 @@ final class TokenRendererTest extends TestCase {
 
 	public function test_build_payload_view_single_system(): void {
 		$view = $this->renderer->build_payload_view(
-			$this->balson_payload(),
-			$this->balson_customer(),
+			$this->single_system_payload(),
+			$this->single_customer(),
 			$this->catalog(),
 			$this->meta()
 		);
 
-		$this->assertSame( 'Brian Balson', $view['customer']['name'] );
+		$this->assertSame( 'Fixture SingleCustomer', $view['customer']['name'] );
 		$this->assertCount( 1, $view['systems'] );
 		$this->assertFalse( $view['is_multi_system'] );
 		$this->assertSame( 1, $view['system_count'] );
@@ -96,8 +98,8 @@ final class TokenRendererTest extends TestCase {
 
 	public function test_build_payload_view_multi_system(): void {
 		$view = $this->renderer->build_payload_view(
-			$this->clemente_payload(),
-			$this->clemente_customer(),
+			$this->multi_system_payload(),
+			$this->multi_customer(),
 			$this->catalog(),
 			$this->meta()
 		);
@@ -113,12 +115,12 @@ final class TokenRendererTest extends TestCase {
 	}
 
 	public function test_rebates_formatted_money(): void {
-		$payload = $this->balson_payload();
+		$payload = $this->single_system_payload();
 		$payload['options']['rebates'] = array(
 			array( 'name' => 'ETOWN 2025', 'amount' => 900.00 ),
 			array( 'name' => 'Manufacturer Promo', 'amount' => 500.0 ),
 		);
-		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $this->catalog(), $this->meta() );
+		$view = $this->renderer->build_payload_view( $payload, $this->single_customer(), $this->catalog(), $this->meta() );
 
 		$this->assertTrue( $view['has_rebates'] );
 		$this->assertCount( 2, $view['rebates'] );
@@ -131,15 +133,15 @@ final class TokenRendererTest extends TestCase {
 	public function test_single_system_template_renders_completely(): void {
 		$tpl = $this->load_template( 'full-replacement.mustache' );
 		$view = $this->renderer->build_payload_view(
-			$this->balson_payload(),
-			$this->balson_customer(),
+			$this->single_system_payload(),
+			$this->single_customer(),
 			$this->catalog(),
 			$this->meta()
 		);
 		$rendered = $this->renderer->render( $tpl, $view );
 
 		$this->assertIsString( $rendered );
-		$this->assertStringContainsString( 'Brian Balson', $rendered );
+		$this->assertStringContainsString( 'Fixture SingleCustomer', $rendered );
 		$this->assertStringContainsString( 'Coleman', $rendered );
 		$this->assertStringContainsString( 'AC8B3036A1B', $rendered );
 		$this->assertStringContainsString( '$18,300.00', $rendered );
@@ -152,8 +154,8 @@ final class TokenRendererTest extends TestCase {
 	public function test_two_system_template_renders_both_systems(): void {
 		$tpl = $this->load_template( 'full-replacement.mustache' );
 		$view = $this->renderer->build_payload_view(
-			$this->clemente_payload(),
-			$this->clemente_customer(),
+			$this->multi_system_payload(),
+			$this->multi_customer(),
 			$this->catalog(),
 			$this->meta()
 		);
@@ -161,7 +163,7 @@ final class TokenRendererTest extends TestCase {
 
 		$this->assertStringContainsString( 'First Floor System', $rendered );
 		$this->assertStringContainsString( 'Second Floor System', $rendered );
-		$this->assertStringContainsString( 'Michael Clemente', $rendered );
+		$this->assertStringContainsString( 'Fixture MultiCustomer', $rendered );
 		// Both condenser model numbers should appear.
 		$this->assertStringContainsString( 'AC8B3024A1B', $rendered );
 		$this->assertStringContainsString( 'AC8B3036A1B', $rendered );
@@ -173,9 +175,9 @@ final class TokenRendererTest extends TestCase {
 	}
 
 	public function test_proposal_notes_follow_selected_options(): void {
-		$payload = $this->balson_payload();
+		$payload = $this->single_system_payload();
 		$payload['options'] = array( 'warranty_parts_years' => 0, 'warranty_labor_years' => 0 );
-		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $this->catalog(), $this->meta() );
+		$view = $this->renderer->build_payload_view( $payload, $this->single_customer(), $this->catalog(), $this->meta() );
 		$this->assertFalse( $view['has_proposal_notes'] );
 		$this->assertSame( array(), $view['proposal_notes'] );
 		$rendered = $this->renderer->render( $this->load_template( 'full-replacement.mustache' ), $view );
@@ -184,7 +186,7 @@ final class TokenRendererTest extends TestCase {
 
 		$payload['options']['credit_card_fee_applies'] = true;
 		$payload['options']['financing_fee_applies'] = true;
-		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $this->catalog(), $this->meta() );
+		$view = $this->renderer->build_payload_view( $payload, $this->single_customer(), $this->catalog(), $this->meta() );
 		$this->assertCount( 2, $view['proposal_notes'] );
 		$rendered = $this->renderer->render( $this->load_template( 'full-replacement.mustache' ), $view );
 		$this->assertStringContainsString( 'An additional processing fee applies to credit card payments.', $rendered );
@@ -193,14 +195,14 @@ final class TokenRendererTest extends TestCase {
 	}
 
 	public function test_edited_description_is_escaped_and_only_permit_rate_can_be_overridden(): void {
-		$payload = $this->balson_payload();
+		$payload = $this->single_system_payload();
 		$catalog = $this->catalog();
 		$catalog['100000001']['rate'] = 3200;
 		$catalog['100000010'] = array( 'item_id' => '100000010', 'name' => 'Permit <city>', 'rate' => 125 );
 		$payload['systems'][0]['equipment']['furnace']['description'] = '<script>alert(1)</script> Approved scope';
 		$payload['systems'][0]['equipment']['furnace']['rate'] = 1;
 		$payload['systems'][0]['equipment']['permit'] = array( 'item_id' => '100000010', 'rate' => 375.126 );
-		$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $catalog, $this->meta() );
+		$view = $this->renderer->build_payload_view( $payload, $this->single_customer(), $catalog, $this->meta() );
 		$this->assertSame( 3200, $view['systems'][0]['furnace']['rate'] );
 		$this->assertSame( 375.13, $view['systems'][0]['permit']['rate'] );
 		$this->assertSame( 125, $catalog['100000010']['rate'], 'The source catalog stays unchanged.' );
@@ -208,11 +210,11 @@ final class TokenRendererTest extends TestCase {
 		$this->assertStringNotContainsString( '<script>', $rendered );
 		$this->assertStringContainsString( '&lt;script&gt;', $rendered );
 		$this->assertStringContainsString( 'Permit &lt;city&gt;', $rendered );
-		$this->assertStringContainsString( '$375.13', $rendered );
+		$this->assertStringNotContainsString( '$375.13', $rendered );
 
 		foreach ( array( -10 => 0, 100001 => 100000 ) as $requested => $expected ) {
 			$payload['systems'][0]['equipment']['permit']['rate'] = $requested;
-			$view = $this->renderer->build_payload_view( $payload, $this->balson_customer(), $catalog, $this->meta() );
+			$view = $this->renderer->build_payload_view( $payload, $this->single_customer(), $catalog, $this->meta() );
 			$this->assertSame( $expected, $view['systems'][0]['permit']['rate'] );
 		}
 	}
@@ -228,7 +230,8 @@ final class TokenRendererTest extends TestCase {
 		$this->assertSame( 1, substr_count( $legacy, '<h3>Permit</h3>' ) );
 		$this->assertStringContainsString( 'Selected note &lt;unsafe&gt;', $legacy );
 		$this->assertStringContainsString( 'Permit &lt;city&gt;', $legacy );
-		$this->assertStringContainsString( '$200.00', $legacy );
+		$this->assertStringNotContainsString( '$200.00', $legacy );
+		$this->assertStringNotContainsString( '$0.00', $legacy );
 		$this->assertStringNotContainsString( '<unsafe>', $legacy );
 
 		$modern = $this->renderer->render( '{{#proposal_notes}}{{text}}{{/proposal_notes}}{{#systems}}{{#permit}}{{display_name}}{{/permit}}{{/systems}}', $view );
@@ -239,22 +242,22 @@ final class TokenRendererTest extends TestCase {
 
 	// ----- Fixtures -----
 
-	private function balson_customer(): array {
+	private function single_customer(): array {
 		return array(
-			'name'  => 'Brian Balson',
-			'phone' => '(732) 555-0101',
-			'email' => 'brian@example.com',
+			'name'  => 'Fixture SingleCustomer',
+			'phone' => '555-0100',
+			'email' => 'single.customer@example.test',
 			'billing_address' => array(
-				'street' => '123 Oak Avenue',
-				'city'   => 'Edison',
+				'street' => '100 Example Street',
+				'city'   => 'ExampleCity',
 				'state'  => 'NJ',
-				'zip'    => '08817',
+				'zip'    => '00000',
 				'country' => 'USA',
 			),
 		);
 	}
 
-	private function balson_payload(): array {
+	private function single_system_payload(): array {
 		return array(
 			'template_id' => 1,
 			'systems' => array(
@@ -281,22 +284,22 @@ final class TokenRendererTest extends TestCase {
 		);
 	}
 
-	private function clemente_customer(): array {
+	private function multi_customer(): array {
 		return array(
-			'name'  => 'Michael Clemente',
-			'phone' => '',
-			'email' => '',
+			'name'  => 'Fixture MultiCustomer',
+			'phone' => '555-0100',
+			'email' => 'multi.customer@example.test',
 			'billing_address' => array(
-				'street' => '456 Maple Street',
-				'city'   => 'Metuchen',
+				'street' => '200 Example Street',
+				'city'   => 'ExampleCity',
 				'state'  => 'NJ',
-				'zip'    => '08840',
+				'zip'    => '00000',
 				'country' => 'USA',
 			),
 		);
 	}
 
-	private function clemente_payload(): array {
+	private function multi_system_payload(): array {
 		return array(
 			'template_id' => 1,
 			'systems' => array(

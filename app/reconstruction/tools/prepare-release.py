@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the offline v0.4.11 catalog-fix release from a clean pinned commit.
+"""Prepare the offline v0.4.13 efficiency/proposal/pricing release from a clean pinned commit.
 
 Supply --commit as the complete current HEAD SHA and --output-root as a fresh
 directory inside this workspace but outside the repository. Only ignored npm
@@ -26,8 +26,8 @@ from datetime import datetime, timezone
 ORIGINAL_SHA = '0c1c04ef023b6aa094b2237e1f62452bed8f08d37ed4308e2d9aa0732937f56b'
 EXPECTED_LOCK_SHA = '95086183b87a15a142ea7423540c286ced2ac2711b2d7c9d1e0e1d6184ae642d'
 OLD_VERSION = '0.4.8'
-NEW_VERSION = '0.4.12'
-EXPECTED_TEST_COUNT = 144
+NEW_VERSION = '0.4.13'
+EXPECTED_TEST_COUNT = 177
 SLUG = 'temp-control-estimate-builder'
 ASSETS = ('estimate-builder.js', 'estimate-builder.css', 'service-worker.js', 'estimate-builder.js.map')
 RUNTIME_OVERRIDES = (

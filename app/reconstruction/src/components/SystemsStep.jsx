@@ -163,7 +163,7 @@ export function SystemsStep({ api, systems, onChange }) {
                     <div className="tc-slot-head">
                       <span className="tc-slot-label">{slot.label}</span>
                       <span className="tc-slot-price">
-                        {formatMoney(item.rate || 0)}
+                        Sales {formatMoney(item.rate || 0)}
                       </span>
                     </div>
                     <div className="tc-slot-body">

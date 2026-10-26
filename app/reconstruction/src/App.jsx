@@ -1,6 +1,6 @@
 /** Reconstructed from the saved v0.4.8 deployment bundle; not recovered original source. */
 import * as React from "react";
-import { cx, sumEquipment } from "./lib/utils.js";
+import { cx, equipmentCostSummary } from "./lib/utils.js";
 import { createApi } from "./lib/api.js";
 import {
   buildPayload,
@@ -80,12 +80,12 @@ export function App({ restUrl, ajaxUrl, nonce, brand }) {
     };
   }, []);
 
-  // Preserve the reference: catalog subtotal follows systems; project total is manual.
-  React.useEffect(() => {
-    const subtotal = sumEquipment(draft.systems);
-    if (subtotal !== draft.pricing.subtotal)
-      dispatch({ type: "setPricing", pricing: { subtotal } });
-  }, [JSON.stringify(draft.systems)]);
+  // Selection and both price bases update atomically in the reducer. Purchase
+  // cost stays distinct from the legacy sales subtotal sent to Books.
+  const equipmentCosts = React.useMemo(
+    () => equipmentCostSummary(draft.systems),
+    [draft.systems],
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -197,6 +197,7 @@ export function App({ restUrl, ajaxUrl, nonce, brand }) {
         {draft.step === "pricing" && (
           <PricingStep
             pricing={draft.pricing}
+            missingCostCount={equipmentCosts.missingCount}
             options={draft.options}
             onPricingChange={(x) =>
               dispatch({

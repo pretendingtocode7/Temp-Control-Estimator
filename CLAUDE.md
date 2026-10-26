@@ -20,6 +20,14 @@ into a separate release tree; keep all original reference bytes intact. Run
 `npm test` and `npm run test:selector` in `app/reconstruction/` for current checks.
 The older `test:parity` suite/evidence describes the historical interface.
 
+The v0.4.13 corrections add AFUE percentage filtering, separate purchase cost
+from the project sales total, and put packages in the proposal equipment list
+without equipment line prices. Read
+`docs/releases/v0.4.13-efficiency-proposal-pricing.md` before changing these paths.
+The UI's internal `pricing.equipment_cost` must never become the legacy wire
+sales subtotal or leak into the customer document. Composite costs come from
+validated actual Books mapped-item purchase costs and quantities, not sales rates.
+
 ## What this is
 
 WordPress plugin for Temp Control HVAC field techs to generate Zoho Books estimates + CRM Deals

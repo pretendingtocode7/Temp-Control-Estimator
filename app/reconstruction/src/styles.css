@@ -689,6 +689,20 @@
   appearance: auto;
   padding-right: 8px;
 }
+.tc-selector-filters > .tc-efficiency-field {
+  grid-column: 1 / -1;
+}
+@media (min-width: 560px) {
+  .tc-selector-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .tc-selector-filters > .tc-efficiency-field {
+    grid-column: auto;
+  }
+}
+.tc-cost-warning {
+  color: #765a00;
+}
 .tc-selector-status {
   margin: 0;
   font-size: 13px;

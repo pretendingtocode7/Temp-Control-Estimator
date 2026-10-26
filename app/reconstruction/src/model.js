@@ -1,5 +1,9 @@
 /** Reconstructed from the saved v0.4.8 deployment bundle; not recovered original source. */
-import { newIdempotencyKey } from "./lib/utils.js";
+import {
+  equipmentCostSummary,
+  newIdempotencyKey,
+  sumEquipment,
+} from "./lib/utils.js";
 
 /** Strip hydrated catalog/customer fields at the same boundary as the ZIP client. */
 export function buildPayload(draft, includeBooksEdits = true) {
@@ -93,7 +97,10 @@ export function createInitialState() {
     },
     pricing: {
       subtotal: 0,
+      equipment_cost: 0,
+      equipment_cost_manual: false,
       total: 0,
+      total_manual: false,
       deposit_percent: 35,
     },
     idempotency_key: null,
@@ -132,13 +139,28 @@ export function draftReducer(state, action) {
         preview_html: "",
         books_edits: null,
       };
-    case "setSystems":
+    case "setSystems": {
+      const salesSubtotal = sumEquipment(action.systems);
+      const cost = equipmentCostSummary(action.systems);
       return {
         ...state,
         systems: action.systems,
+        pricing: {
+          ...state.pricing,
+          // Keep the legacy Books subtotal as sales data; actual purchase cost
+          // is internal only and is excluded by buildPayload's pricing allowlist.
+          subtotal: salesSubtotal,
+          total: state.pricing.total_manual
+            ? state.pricing.total
+            : salesSubtotal,
+          equipment_cost: state.pricing.equipment_cost_manual
+            ? state.pricing.equipment_cost
+            : cost.subtotal,
+        },
         preview_html: "",
         books_edits: null,
       };
+    }
     case "setOptions":
       return {
         ...state,
@@ -149,16 +171,22 @@ export function draftReducer(state, action) {
         preview_html: "",
         books_edits: null,
       };
-    case "setPricing":
+    case "setPricing": {
+      const pricing = { ...state.pricing, ...action.pricing };
+      if (Object.prototype.hasOwnProperty.call(action.pricing, "total"))
+        pricing.total_manual = action.pricing.total_manual !== false;
+      if (
+        Object.prototype.hasOwnProperty.call(action.pricing, "equipment_cost")
+      )
+        pricing.equipment_cost_manual =
+          action.pricing.equipment_cost_manual !== false;
       return {
         ...state,
-        pricing: {
-          ...state.pricing,
-          ...action.pricing,
-        },
+        pricing,
         preview_html: "",
         books_edits: null,
       };
+    }
     case "allocateIdempotencyKey":
       return state.idempotency_key
         ? state

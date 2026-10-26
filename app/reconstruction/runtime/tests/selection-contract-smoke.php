@@ -171,7 +171,7 @@ namespace {
 		Audit_Log::instance()->records = Audit_Log::instance()->updates = array();
 		Customer_Search::instance()->reads = 0;
 		$GLOBALS['selection_template'] = (object) array( 'ID' => 1, 'post_type' => 'estimate_template', 'post_status' => 'publish',
-			'post_content' => '<h2>Equipment</h2>{{#systems}}{{#furnace}}{{name}}{{/furnace}}{{#has_other}}{{#other}}{{name}}{{/other}}{{/has_other}}{{/systems}}' );
+			'post_content' => '<h3>Equipment to Be Installed</h3>{{#systems}}<h4>{{system_label}}</h4><ul>{{#furnace}}{{name}}{{/furnace}}{{#has_other}}{{#other}}{{name}}{{/other}}{{/has_other}}</ul>{{/systems}}<h3>Scope of Work</h3>' );
 	}
 	function selection_payload( ?array $equipment = null ): array {
 		return array( 'template_id' => 1, 'customer' => array( 'zoho_account_id' => '20000000001' ),
@@ -201,14 +201,24 @@ namespace {
 		selection_same( 1, count( $view['systems'][0]['items'] ), 'No expanded children' );
 		selection_same( array(), $view['systems'][0]['other'], 'No duplicate other entry' );
 	} );
-	selection_case( 'Legacy other template appends escaped name description system and price once', function (): void {
+	selection_case( 'Legacy other template places package in equipment section without price or bottom duplicate', function (): void {
 		reset_selection(); $view = selected_view( selection_payload() );
 		$html = Token_Renderer::instance()->render( $GLOBALS['selection_template']->post_content, $view );
 		selection_check( is_string( $html ), 'Rendered proposal' );
 		selection_same( 1, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'One package name' );
 		selection_same( 1, substr_count( $html, 'Install &lt;matched&gt; system &amp; startup' ), 'One escaped description' );
-		selection_same( 1, substr_count( $html, '$9,400.00' ), 'One catalog price' );
+		selection_same( 0, substr_count( $html, '$9,400.00' ), 'No equipment line price' );
 		selection_check( str_contains( $html, 'Main &lt;Floor&gt;' ) && ! str_contains( $html, '<Matched>' ), 'Escaped system and package text' );
+		selection_check( strpos( $html, 'Equipment to Be Installed' ) < strpos( $html, 'Complete &lt;Matched&gt;' ) && strpos( $html, 'Complete &lt;Matched&gt;' ) < strpos( $html, 'Scope of Work' ), 'Package stays inside the actual equipment section' );
+		selection_check( ! str_contains( $html, '<h3>Package</h3>' ), 'No appended package block' );
+	} );
+	selection_case( 'Legacy package row does not repeat an identical package-name description', function (): void {
+		reset_selection(); $payload = selection_payload();
+		$payload['systems'][0]['equipment']['package']['description'] = 'Complete <Matched> Package & Scope';
+		$view = selected_view( $payload );
+		$html = Token_Renderer::instance()->render( $GLOBALS['selection_template']->post_content, $view );
+		selection_same( 1, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'One package name when description matches it' );
+		selection_same( 'Complete <Matched> Package & Scope', $view['systems'][0]['package']['short_description'], 'Internal selected description stays intact' );
 	} );
 	foreach ( array(
 		'generic items' => '{{#systems}}{{#items}}{{display_name}} | {{short_description}} | {{rate_formatted}}{{/items}}{{/systems}}',
@@ -222,7 +232,7 @@ namespace {
 			reset_selection(); $html = Token_Renderer::instance()->render( $template, selected_view( selection_payload() ) );
 			selection_check( is_string( $html ), 'Rendered proposal' );
 			selection_same( 1, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'Package name appears once' );
-			selection_same( 1, substr_count( $html, '$9,400.00' ), 'Package price appears once' );
+			selection_same( 0, substr_count( $html, '$9,400.00' ), 'Equipment price is withheld even from explicit price tokens' );
 			selection_check( ! str_contains( $html, '<h3>Package</h3>' ), 'No compatibility duplicate' );
 		} );
 	}
@@ -241,6 +251,62 @@ namespace {
 		$html = Token_Renderer::instance()->render( 'Legacy', selected_view( $payload ) );
 		selection_same( 2, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'Two separate systems' );
 		selection_check( str_contains( $html, 'Main &lt;Floor&gt;' ) && str_contains( $html, 'Second Floor' ), 'Both labels' );
+	} );
+	selection_case( 'Document copy removes every equipment financial alias and keeps sale summary and specifications', function (): void {
+		reset_selection(); $view = selected_view( selection_payload() );
+		$financial = array( 'rate' => 'RATE-SECRET', 'rate_formatted' => 'RATE-FORMATTED-SECRET', 'purchase_cost' => 'COST-SECRET', 'markup' => 'MARKUP-SECRET', 'sales_price' => 'PRICE-SECRET' );
+		$item = array_merge( $view['systems'][0]['package'], $financial, array( 'tons' => 1.5, 'btu_input' => 100000 ) );
+		$view['systems'][0]['package'] = $item;
+		$view['systems'][0]['items'] = array( $item );
+		$view['systems'][0]['other'] = array( $item );
+		$view['pricing'] = array( 'subtotal' => 'SUBTOTAL-SECRET', 'subtotal_formatted' => 'SUBTOTAL-FORMATTED-SECRET', 'equipment_cost' => 'INTERNAL-COST-SECRET',
+			'total' => 14000, 'total_formatted' => '$14,000.00', 'deposit_percent' => 35, 'deposit_amount' => 4900, 'deposit_amount_formatted' => '$4,900.00' );
+		$before = $view;
+		$template = '{{#systems}}{{#package}}{{rate}}{{rate_formatted}}{{purchase_cost}}{{markup}}{{sales_price}}{{tons}} tons {{btu_input}} BTU{{/package}}'
+			. '{{#items}}{{rate}}{{rate_formatted}}{{purchase_cost}}{{markup}}{{sales_price}}{{/items}}{{#other}}{{rate}}{{rate_formatted}}{{purchase_cost}}{{markup}}{{sales_price}}{{/other}}{{/systems}}'
+			. '{{pricing.subtotal}}{{pricing.subtotal_formatted}}{{pricing.equipment_cost}}Total {{pricing.total_formatted}} Deposit {{pricing.deposit_amount_formatted}}';
+		$html = Token_Renderer::instance()->render( $template, $view );
+		selection_check( is_string( $html ) && ! str_contains( $html, 'SECRET' ), 'No structured line price or internal cost token reaches HTML' );
+		selection_check( str_contains( $html, '$14,000.00' ) && str_contains( $html, '$4,900.00' ), 'Sale total and deposit retained' );
+		selection_check( str_contains( $html, '1.5 tons 100000 BTU' ), 'Equipment specifications retained' );
+		selection_same( $before, $view, 'Rendering never mutates the internal view' );
+	} );
+	selection_case( 'Known legacy subtotal row is omitted while total and deposit remain', function (): void {
+		reset_selection(); $payload = selection_payload(); $payload['pricing'] = array( 'subtotal' => 9400, 'total' => 14000, 'deposit_percent' => 35 );
+		$view = selected_view( $payload );
+		$template = $GLOBALS['selection_template']->post_content . '<table><tr><td style="padding:6px 0;">Subtotal</td><td style="text-align:right;">{{pricing.subtotal_formatted}}</td></tr>'
+			. '<tr><td>Total Project Cost</td><td>{{pricing.total_formatted}}</td></tr><tr><td>Deposit</td><td>{{pricing.deposit_amount_formatted}}</td></tr></table>';
+		$html = Token_Renderer::instance()->render( $template, $view );
+		selection_check( is_string( $html ) && ! str_contains( $html, 'Subtotal' ) && ! str_contains( $html, '$9,400.00' ), 'No subtotal row or equipment sale price' );
+		selection_check( str_contains( $html, '$14,000.00' ) && str_contains( $html, '$4,900.00' ), 'Only project sale total and deposit values' );
+		selection_same( 1, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'One package within equipment section' );
+	} );
+	selection_case( 'Exact legacy condenser specifications stay balanced for every missing-field combination', function (): void {
+		reset_selection(); $view = selected_view( selection_payload( array( 'condenser' => array( 'item_id' => AC_ID ) ) ) );
+		$template = '{{#systems}}{{#condenser}}Condenser {{model}}{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}}{{/refrigerant}}){{/condenser}}{{/systems}}';
+		foreach ( array( null, 13.4 ) as $seer ) {
+			foreach ( array( null, 1.5 ) as $tons ) {
+				foreach ( array( null, 'R-410A' ) as $refrigerant ) {
+					$view['systems'][0]['condenser']['seer'] = $seer;
+					$view['systems'][0]['condenser']['tons'] = $tons;
+					$view['systems'][0]['condenser']['refrigerant'] = $refrigerant;
+					$html = Token_Renderer::instance()->render( $template, $view );
+					selection_same( substr_count( $html, '(' ), substr_count( $html, ')' ), 'No unmatched legacy parenthesis' );
+					selection_same( null !== $seer, str_contains( $html, '(13.4 SEER)' ), 'SEER group appears only when known' );
+					selection_same( null !== $tons, str_contains( $html, ' — 1.5 ton' ), 'Tonnage is independently labeled' );
+					selection_same( null !== $refrigerant, str_contains( $html, ' — R-410A' ), 'Refrigerant is independently labeled' );
+				}
+			}
+		}
+		$custom = '{{#systems}}{{#condenser}}{{model}} (authored layout){{/condenser}}{{/systems}}';
+		selection_same( 'FIXTURE-MODEL (authored layout)', Token_Renderer::instance()->render( $custom, $view ), 'Unrelated authored punctuation is unchanged' );
+	} );
+	selection_case( 'Unknown layouts retain explicit escaped price-free package and permit fallback', function (): void {
+		reset_selection(); $payload = selection_payload( array( 'package' => array( 'item_id' => PACKAGE_ID ), 'permit' => array( 'item_id' => PERMIT_ID ) ) );
+		$html = Token_Renderer::instance()->render( '<p>Custom unsupported layout</p>', selected_view( $payload ) );
+		selection_check( is_string( $html ) && str_contains( $html, '<h3>Package</h3>' ) && str_contains( $html, '<h3>Permit</h3>' ), 'Explicit fallback preserves selected equipment' );
+		selection_check( ! str_contains( $html, '$' ), 'No fallback line price or misleading zero amount' );
+		selection_same( 1, substr_count( $html, 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'Unknown layout does not duplicate package' );
 	} );
 	selection_case( 'Package plus permit creates one Books package line and stable edits without double pricing', function (): void {
 		reset_selection(); $payload = selection_payload( array( 'permit' => array( 'item_id' => PERMIT_ID ), 'package' => array( 'item_id' => PACKAGE_ID ) ) );
@@ -261,6 +327,13 @@ namespace {
 		selection_same( 2, count( $transaction['crm']['quoted_equipment'] ), 'One package and one permit CRM row' );
 		selection_same( 'package', $transaction['crm']['quoted_equipment'][0]['Slot'], 'Canonical CRM slot payload' );
 		selection_check( str_contains( $transaction['books']['annexure_content'], 'Complete &lt;Matched&gt; Package &amp; Scope' ), 'Annexure retains escaped actual package name' );
+		$before = $view;
+		$customer_html = Token_Renderer::instance()->render( $GLOBALS['selection_template']->post_content, $view );
+		$after_render = $method->invoke( $generator, $payload, array(), $view, $customer_html, array(), 'test-key', '60000000001' );
+		selection_same( $before, $view, 'Customer rendering leaves the pricing view unchanged' );
+		selection_same( $lines, $after_render['books']['line_items'], 'Books sales line prices and edit mapping unchanged after private rendering' );
+		selection_same( 400.0, $after_render['books']['adjustment'], 'Project total adjustment remains sales-based' );
+		selection_check( ! str_contains( $after_render['books']['annexure_content'], '$9,400.00' ) && ! str_contains( $after_render['books']['template_body'], '$9,400.00' ), 'Customer document channels omit package line amount' );
 	} );
 	selection_case( 'Annexure package name survives blank/different brand/model and is escaped', function (): void {
 		$method = new \ReflectionMethod( Estimate_Generator::instance(), 'books_equipment_html' ); $method->setAccessible( true );

@@ -24,8 +24,9 @@ final class Equipment_Catalog {
 
 	private const MAX_PAGES = 50;
 	private const PER_PAGE  = 200;
-	private const CACHE_POLICY = 'package_tag_v2';
+	private const CACHE_POLICY = 'package_tag_v3';
 	private const LIST_CACHE_TTL = 900;
+	private const MAX_COMPOSITE_COMPONENTS = 100;
 	private const SELECTOR_TYPES = array(
 		'package' => 'package', 'ac' => 'condenser', 'furnace' => 'furnace', 'coil' => 'evaporator_coil',
 	);
@@ -107,7 +108,7 @@ final class Equipment_Catalog {
 		}
 		$limit = min( 100, $limit );
 		$filters = array();
-		foreach ( array( 'btu' => 'btu', 'tons' => 'tons' ) as $key => $kind ) {
+		foreach ( array( 'btu' => 'btu', 'tons' => 'tons', 'efficiency' => 'percent' ) as $key => $kind ) {
 			$value = $args[ $key ] ?? null;
 			$filters[ $key ] = null;
 			if ( null !== $value && '' !== $value ) {
@@ -124,6 +125,7 @@ final class Equipment_Catalog {
 		$matches = array();
 		$btus = array();
 		$tons = array();
+		$efficiencies = array();
 		foreach ( $items as $entry ) {
 			if ( $entry['selection_category'] !== $category ) {
 				continue;
@@ -134,18 +136,24 @@ final class Equipment_Catalog {
 			if ( null !== $entry['tons'] ) {
 				$tons[] = $entry['tons'];
 			}
+			if ( null !== $entry['efficiency_percent'] ) {
+				$efficiencies[] = $entry['efficiency_percent'];
+			}
 			if ( ( '' !== $brand && 0 !== strcasecmp( $entry['brand'], $brand ) ) ||
 				! $this->matches_text( $entry, $q ) ||
 				( null !== $filters['btu'] && $entry['btu_input'] !== $filters['btu'] ) ||
-				( null !== $filters['tons'] && ( null === $entry['tons'] || (float) $entry['tons'] !== $filters['tons'] ) ) ) {
+				( null !== $filters['tons'] && ( null === $entry['tons'] || (float) $entry['tons'] !== $filters['tons'] ) ) ||
+				( null !== $filters['efficiency'] && ( null === $entry['efficiency_percent'] || (float) $entry['efficiency_percent'] !== $filters['efficiency'] ) ) ) {
 				continue;
 			}
 			$matches[] = $entry;
 		}
 		$btus = array_values( array_unique( $btus, SORT_NUMERIC ) );
 		$tons = array_values( array_unique( $tons, SORT_NUMERIC ) );
+		$efficiencies = array_values( array_unique( $efficiencies, SORT_NUMERIC ) );
 		sort( $btus, SORT_NUMERIC );
 		sort( $tons, SORT_NUMERIC );
+		sort( $efficiencies, SORT_NUMERIC );
 		$total = count( $matches );
 		// Avoid overflowing an offset for an otherwise valid, very distant page.
 		$offset = $page > intdiv( PHP_INT_MAX, $limit ) ? $total : ( $page - 1 ) * $limit;
@@ -155,7 +163,7 @@ final class Equipment_Catalog {
 			'page' => $page,
 			'per_page' => $limit,
 			'has_more' => $offset < $total && $limit < $total - $offset,
-			'facets' => array( 'btus' => $btus, 'tons' => $tons ),
+			'facets' => array( 'btus' => $btus, 'tons' => $tons, 'efficiencies' => $efficiencies ),
 		);
 	}
 
@@ -459,6 +467,28 @@ final class Equipment_Catalog {
 					return false;
 				}
 			}
+			foreach ( array( 'efficiency_percent', 'purchase_cost' ) as $field ) {
+				if ( ! array_key_exists( $field, $item ) ||
+					( null !== $item[ $field ] &&
+						( ( ! is_int( $item[ $field ] ) && ! is_float( $item[ $field ] ) ) ||
+						! is_finite( (float) $item[ $field ] ) ||
+						( 'efficiency_percent' === $field ? ( $item[ $field ] <= 0 || $item[ $field ] > 100 ) : $item[ $field ] < 0 ) ) ) ) {
+					return false;
+				}
+			}
+			if ( ( $item['afue'] ?? null ) !== $item['efficiency_percent'] ) {
+				return false;
+			}
+			if ( null === $item['purchase_cost'] ) {
+				if ( null !== ( $item['purchase_cost_source'] ?? null ) || 'unknown' !== ( $item['purchase_cost_status'] ?? null ) ) {
+					return false;
+				}
+			} elseif ( 'known' !== ( $item['purchase_cost_status'] ?? null ) ||
+				! in_array( $item['purchase_cost_source'] ?? null, array( 'books_purchase_rate', 'books_mapped_items' ), true ) ||
+				( 'books_mapped_items' === $item['purchase_cost_source'] && ! $item['is_composite'] ) ||
+				( 'books_purchase_rate' === $item['purchase_cost_source'] && $item['is_composite'] && $item['purchase_cost'] <= 0 ) ) {
+				return false;
+			}
 		}
 		return true;
 	}
@@ -521,6 +551,8 @@ final class Equipment_Catalog {
 		$btu_input = $this->item_rating( $item, array( 'cf_btu_input', 'btu_input' ), 'btu', $name );
 		// An unlabeled name BTU value is never evidence of output capacity.
 		$btu_output = $this->item_rating( $item, array( 'cf_btu_output', 'btu_output' ), 'btu', '' );
+		$efficiency = $this->item_rating( $item, array( 'cf_afue', 'afue', 'cf_afue_percent', 'afue_percent' ), 'percent', $name );
+		$cost = $this->item_purchase_cost( $item );
 		$desc  = (string) $this->first_value( $item, $cf, array( 'description', 'Description', 'cf_short_description', 'short_description', 'Short_Description' ), '' );
 
 		return array(
@@ -534,7 +566,8 @@ final class Equipment_Catalog {
 			'is_composite'           => $classification['is_composite'],
 			'brand'                  => $brand,
 			'model'                  => $model,
-			'afue'                   => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_afue', 'afue', 'AFUE', 'AFUE_Percent' ), null ) ),
+			'afue'                   => $efficiency,
+			'efficiency_percent'     => $efficiency,
 			'seer'                   => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_seer', 'seer', 'SEER', 'SEER_Rating' ), null ) ),
 			'tons'                   => $tons,
 			'btu_input'              => $btu_input,
@@ -546,7 +579,9 @@ final class Equipment_Catalog {
 			'warranty_labor_years'   => $this->nullable_int( $this->first_value( $item, $cf, array( 'cf_warranty_labor_years', 'warranty_labor_years', 'Warranty_Labor_Years' ), null ) ),
 			'short_description'      => $desc,
 			'long_description'       => $desc,
-			'purchase_cost'          => $this->nullable_float( $this->first_value( $item, $cf, array( 'purchase_rate', 'Purchase_Cost' ), null ) ),
+			'purchase_cost'          => $cost['value'],
+			'purchase_cost_source'   => $cost['source'],
+			'purchase_cost_status'   => null === $cost['value'] ? 'unknown' : 'known',
 			'markup'                 => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_markup', 'markup', 'Markup' ), null ) ),
 			'js_part_number'         => (string) $this->first_value( $item, $cf, array( 'cf_js_part_number', 'js_part_number', 'JS_Part_Number', 'sku' ), '' ),
 			'mfg_part_number'        => (string) $this->first_value( $item, $cf, array( 'cf_mfg_part_number', 'mfg_part_number', 'Mfg_Part_Number' ), '' ),
@@ -710,9 +745,11 @@ final class Equipment_Catalog {
 			$number = (float) $value;
 		} elseif ( is_string( $value ) ) {
 			$numeric = '(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?|\.[0-9]+';
-			$pattern = 'tons' === $kind
-				? '/^(' . $numeric . ')\s*(?:-?\s*tons?)?$/iD'
-				: '/^(' . $numeric . ')\s*(k)?\s*(?:-?\s*btu(?:\s*\/\s*h(?:r|our)?)?)?$/iD';
+			$pattern = 'percent' === $kind
+				? '/^(' . $numeric . ')\s*%?$/D'
+				: ( 'tons' === $kind
+					? '/^(' . $numeric . ')\s*(?:-?\s*tons?)?$/iD'
+					: '/^(' . $numeric . ')\s*(k)?\s*(?:-?\s*btu(?:\s*\/\s*h(?:r|our)?)?)?$/iD' );
 			if ( 1 !== preg_match( $pattern, trim( $value ), $match ) ) {
 				return null;
 			}
@@ -726,6 +763,9 @@ final class Equipment_Catalog {
 		if ( ! is_finite( $number ) || $number <= 0 ) {
 			return null;
 		}
+		if ( 'percent' === $kind && $number > 100 ) {
+			return null;
+		}
 		if ( 'btu' === $kind ) {
 			return $number < PHP_INT_MAX && floor( $number ) === $number ? (int) $number : null;
 		}
@@ -733,6 +773,9 @@ final class Equipment_Catalog {
 	}
 
 	private function name_rating( string $name, string $kind ): int|float|null {
+		if ( 'percent' === $kind ) {
+			return $this->name_efficiency( $name );
+		}
 		$numeric = '(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?|\.[0-9]+';
 		$unit = 'tons' === $kind ? 'tons?' : 'k?\s*(?:-\s*)?btu(?:\s*\/\s*h(?:r|our)?)?';
 		$pattern = '/(?<![a-zA-Z0-9.,+\/-])(' . $numeric . ')\s*(?:-\s*)?' . $unit . '(?![a-zA-Z0-9])/i';
@@ -750,6 +793,87 @@ final class Equipment_Catalog {
 			$rating = $parsed;
 		}
 		return $rating;
+	}
+
+	/** Only an explicitly labeled AFUE percentage is an efficiency fallback. */
+	private function name_efficiency( string $name ): ?float {
+		$numeric = '[0-9]+(?:\.[0-9]+)?';
+		$patterns = array(
+			'/(?<![a-zA-Z0-9.,+\/-])(' . $numeric . ')\s*%\s*AFUE\b/i',
+			'/\bAFUE\s*[:=]?\s*(' . $numeric . ')\s*%(?![a-zA-Z0-9])/i',
+		);
+		$rating = null;
+		foreach ( $patterns as $pattern ) {
+			preg_match_all( $pattern, $name, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE );
+			foreach ( $matches as $match ) {
+				$prefix = substr( $name, 0, $match[0][1] );
+				if ( 1 === preg_match( '/[0-9]\s*%?\s*(?:[-–—\/]|to|or)\s*$/iu', $prefix ) ) {
+					return null;
+				}
+				$parsed = $this->parse_rating( $match[1][0], 'percent' );
+				if ( null === $parsed || ( null !== $rating && $rating !== $parsed ) ) {
+					return null;
+				}
+				$rating = $parsed;
+			}
+		}
+		return $rating;
+	}
+
+	/**
+	 * Use actual purchase rates only. A zero-priced composite list row does not
+	 * establish cost; its detail must contain a complete, flat component mapping.
+	 * This normalization never fetches details or substitutes any sales amount.
+	 */
+	private function item_purchase_cost( array $item ): array {
+		$unknown = array( 'value' => null, 'source' => null );
+		$parent_cost = $this->nonnegative_number( $item['purchase_rate'] ?? null );
+		if ( null === $parent_cost ) {
+			return $unknown;
+		}
+		if ( $parent_cost > 0 || false === ( $item['is_combo_product'] ?? null ) ) {
+			return array( 'value' => $parent_cost, 'source' => 'books_purchase_rate' );
+		}
+		$components = $item['mapped_items'] ?? null;
+		if ( true !== ( $item['is_combo_product'] ?? null ) || ! is_array( $components ) ||
+			! array_is_list( $components ) || 0 === count( $components ) || count( $components ) > self::MAX_COMPOSITE_COMPONENTS ) {
+			return $unknown;
+		}
+		$total = 0.0;
+		$seen = array();
+		foreach ( $components as $component ) {
+			if ( ! is_array( $component ) || true !== ( $component['is_component'] ?? null ) ||
+				false !== ( $component['is_combo_product'] ?? null ) ||
+				! $this->valid_item_id( $component['item_id'] ?? null ) ||
+				( $component['item_id'] ?? null ) === ( $item['item_id'] ?? null ) ||
+				isset( $seen[ $component['item_id'] ] ) || ! empty( $component['mapped_items'] ) ) {
+				return $unknown;
+			}
+			$cost = $this->nonnegative_number( $component['purchase_rate'] ?? null );
+			$quantity = $this->nonnegative_number( $component['mapped_quantity'] ?? null );
+			if ( null === $cost || null === $quantity || $quantity <= 0 ) {
+				return $unknown;
+			}
+			$seen[ $component['item_id'] ] = true;
+			$total += $cost * $quantity;
+			if ( ! is_finite( $total ) ) {
+				return $unknown;
+			}
+		}
+		return array( 'value' => $total, 'source' => 'books_mapped_items' );
+	}
+
+	private function nonnegative_number( mixed $value ): ?float {
+		if ( is_string( $value ) ) {
+			if ( 1 !== preg_match( '/^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?$/D', trim( $value ) ) ) {
+				return null;
+			}
+			$value = (float) str_replace( ',', '', trim( $value ) );
+		}
+		if ( ! is_int( $value ) && ! is_float( $value ) ) {
+			return null;
+		}
+		return is_finite( (float) $value ) && $value >= 0 ? (float) $value : null;
 	}
 
 	private function normalize_type( string $value ): string {

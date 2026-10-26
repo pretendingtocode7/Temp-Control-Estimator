@@ -1,5 +1,20 @@
 import { expect } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { inspectFixturePdf } from "../parity/pdf-inspect.js";
+
+const rendererPath = process.env.UNIFIED_SELECTOR_PREVIEW_FIXTURE;
+const rendererBytes = rendererPath ? fs.readFileSync(rendererPath) : null;
+const rendererEnvelope = rendererBytes ? JSON.parse(rendererBytes) : null;
+const rendererFixture = rendererEnvelope?.data || rendererEnvelope;
+export const previewSource = rendererFixture
+  ? {
+      mode: "actual-php-fixture",
+      file: path.basename(rendererPath),
+      sha256: createHash("sha256").update(rendererBytes).digest("hex"),
+    }
+  : { mode: "synthetic-browser-fixture" };
 
 export const origin = "http://127.0.0.1:4190";
 export const account = {
@@ -8,10 +23,10 @@ export const account = {
   email: "fixture@example.test",
   phone: "555-0100",
   billing_address: {
-    street: "7 Example Street",
-    city: "Fixture City",
+    street: "100 Example Street",
+    city: "Example City",
     state: "NJ",
-    zip: "08817",
+    zip: "00000",
     country: "USA",
   },
 };
@@ -23,6 +38,9 @@ const item = (id, name, category, rate, details = {}) => ({
   sku: `FIX-${id}`,
   short_description: `${name} synthetic scope`,
   rate,
+  purchase_cost: Math.round(rate * 50) / 100,
+  purchase_cost_status: "known",
+  purchase_cost_source: "books_purchase_rate",
   selection_category: category,
   equipment_type:
     {
@@ -44,6 +62,11 @@ export const targetPackage = item(
   {
     tons: 1.5,
     btu_input: 100000,
+    efficiency_percent: 96,
+    // Composite list responses cannot establish mapped-component cost.
+    purchase_cost: null,
+    purchase_cost_status: "unknown",
+    purchase_cost_source: null,
     js_part_number: "PKG-COMBINATION",
     mfg_part_number: "FIXTURE-PACKAGE-100000-18",
   },
@@ -51,22 +74,57 @@ export const targetPackage = item(
 export const ac = item(911, "Fixture AC 1.5 ton", "ac", 3300, {
   tons: 1.5,
   btu_input: null,
+  efficiency_percent: null,
+  purchase_cost: 1900,
 });
 export const furnace = item(
   912,
   "Fixture Furnace 100000 BTU",
   "furnace",
   2800,
-  { tons: null, btu_input: 100000 },
+  {
+    tons: null,
+    btu_input: 100000,
+    efficiency_percent: 96,
+    purchase_cost: 1600,
+  },
 );
 export const coil = item(913, "Fixture Coil 1.5 ton", "coil", 850, {
   tons: 1.5,
   btu_input: null,
+  efficiency_percent: null,
+  purchase_cost: 400,
 });
 export const thermostat = item(914, "Fixture Thermostat", "thermostat", 250, {
   tons: null,
   btu_input: null,
 });
+export const missingCost = item(
+  915,
+  "Fixture Unknown Cost AC 2 ton",
+  "ac",
+  4300,
+  {
+    tons: 2,
+    btu_input: null,
+    efficiency_percent: null,
+    purchase_cost: null,
+    purchase_cost_status: "unknown",
+    purchase_cost_source: null,
+  },
+);
+export const zeroCost = item(
+  916,
+  "Fixture Zero Cost Furnace",
+  "furnace",
+  1800,
+  {
+    tons: null,
+    btu_input: 80000,
+    efficiency_percent: 80,
+    purchase_cost: 0,
+  },
+);
 export const packages = Array.from({ length: 130 }, (_, index) =>
   item(
     index + 1,
@@ -76,6 +134,10 @@ export const packages = Array.from({ length: 130 }, (_, index) =>
     {
       btu_input: [80000, 100000, 120000][index % 3],
       tons: [1.5, 2, 3][index % 3],
+      efficiency_percent: [80, 95, 96][index % 3],
+      purchase_cost: null,
+      purchase_cost_status: "unknown",
+      purchase_cost_source: null,
     },
   ),
 ).concat([
@@ -83,15 +145,52 @@ export const packages = Array.from({ length: 130 }, (_, index) =>
   item(902, "Fixture Combination Package 80000 BTU 1.5 ton", "package", 8400, {
     btu_input: 80000,
     tons: 1.5,
+    efficiency_percent: 96,
   }),
   item(903, "Fixture Combination Package 100000 BTU 3 ton", "package", 9200, {
     btu_input: 100000,
     tons: 3,
+    efficiency_percent: 96,
   }),
+  item(
+    904,
+    "Fixture Combination Package 100000 BTU 1.5 ton 80 percent",
+    "package",
+    8600,
+    {
+      btu_input: 100000,
+      tons: 1.5,
+      efficiency_percent: 80,
+      purchase_cost: null,
+      purchase_cost_status: "unknown",
+      purchase_cost_source: null,
+    },
+  ),
 ]);
-export const allItems = [...packages, ac, furnace, coil, thermostat];
+export const allItems = [
+  ...packages,
+  ac,
+  furnace,
+  coil,
+  thermostat,
+  missingCost,
+  zeroCost,
+];
+export function detailFor(catalog) {
+  return catalog.selection_category === "package"
+    ? {
+        ...catalog,
+        purchase_cost:
+          catalog.item_id === targetPackage.item_id
+            ? 5200
+            : Math.round(catalog.rate * 50) / 100,
+        purchase_cost_status: "known",
+        purchase_cost_source: "books_mapped_items",
+      }
+    : { ...catalog };
+}
 export const template = {
-  id: 42,
+  id: rendererFixture?.template_id || 42,
   name: "Fixture Full Replacement",
   template_type: "full_replacement",
   default_warranty_parts: 10,
@@ -125,15 +224,28 @@ export function previewFor(payload) {
       };
     }),
   );
+  if (rendererFixture) {
+    expect(lines.map((line) => line.item_id).sort()).toEqual(
+      rendererFixture.books_preview.line_items
+        .map((line) => line.item_id)
+        .sort(),
+    );
+    expect(payload.pricing).toEqual({
+      subtotal: 12100,
+      total: 14000,
+      deposit_percent: 35,
+    });
+    return rendererFixture;
+  }
   return {
-    html: `<h1>Unified selector fixture proposal</h1><p>Prepared for ${account.name}</p><ul>${lines.map((line) => `<li>${escape(line.name)} — ${escape(line.description)}</li>`).join("")}</ul><p>Project total: $${Number(payload.pricing.total).toFixed(2)}</p>`,
+    html: `<h1>Unified selector fixture proposal</h1><p>Prepared for ${account.name}</p><h3>Equipment to Be Installed</h3><ul>${lines.map((line) => `<li>${escape(line.name)} — ${escape(line.description)}</li>`).join("")}</ul><h3>Scope of Work</h3><p>Synthetic installation scope.</p><h3>Investment</h3><p>Project total: $${Number(payload.pricing.total).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p><p>Deposit: $${Number((payload.pricing.total * payload.pricing.deposit_percent) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>`,
     books_preview: {
       line_items: lines,
       notes: "Synthetic local approval notes.",
       terms: "Synthetic proposal valid for 30 days.",
     },
     view: {},
-    template_id: 42,
+    template_id: template.id,
     template_version: 3,
   };
 }
@@ -149,6 +261,8 @@ export async function installFixture(page) {
     sendStatusCount: 0,
     previews: [],
     generated: [],
+    details: [],
+    previewSource,
   };
   page.on("pageerror", (error) => state.errors.push(error.message));
   await page
@@ -209,7 +323,8 @@ export async function installFixture(page) {
       const category = url.searchParams.get("category") || "package",
         query = (url.searchParams.get("q") || "").toLowerCase().trim();
       const btu = url.searchParams.get("btu") || "",
-        tons = url.searchParams.get("tons") || "";
+        tons = url.searchParams.get("tons") || "",
+        efficiency = url.searchParams.get("efficiency") || "";
       const page = Number(url.searchParams.get("page") || 1),
         limit = Number(url.searchParams.get("limit") || 50);
       expect(["package", "ac", "furnace", "coil"]).toContain(category);
@@ -228,16 +343,33 @@ export async function installFixture(page) {
         );
       if (btu) rows = rows.filter((entry) => entry.btu_input === Number(btu));
       if (tons) rows = rows.filter((entry) => entry.tons === Number(tons));
+      if (efficiency)
+        rows = rows.filter(
+          (entry) => entry.efficiency_percent === Number(efficiency),
+        );
       const result = await respond({
         items: rows.slice((page - 1) * limit, page * limit),
         total: rows.length,
         page,
         per_page: limit,
         has_more: page * limit < rows.length,
-        facets: { btus: [80000, 100000, 120000], tons: [1.5, 2, 3] },
+        facets: {
+          btus: [80000, 100000, 120000],
+          tons: [1.5, 2, 3],
+          efficiencies: [80, 95, 96],
+        },
       });
       if (query === "slow-package") state.delayedCompleted++;
       return result;
+    }
+    const detailId = endpoint.match(/^\/equipment\/(\d+)$/)?.[1];
+    if (detailId) {
+      expect(request.method()).toBe("GET");
+      const catalog = allItems.find((entry) => entry.item_id === detailId);
+      expect(catalog, "known synthetic detail item").toBeTruthy();
+      const detail = detailFor(catalog);
+      state.details.push(detail);
+      return respond(detail);
     }
     if (endpoint === "/equipment") {
       const type = url.searchParams.get("type");
@@ -310,6 +442,7 @@ export async function installFixture(page) {
         html,
       };
       state.pdfImages = inspection.images;
+      state.pdfBytes = pdf;
       return respond(
         {
           job_id: "unified-fixture-job",

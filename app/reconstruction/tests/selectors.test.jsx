@@ -94,6 +94,14 @@ describe("equipment picker", () => {
     });
     expect(screen.getByText(first.name)).toBeTruthy();
     expect(screen.queryByText(second.name)).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "no matching package" },
+    });
+    expect(
+      screen.getByText(
+        "No active Package-tagged items match. Check the Package tag in Zoho Books.",
+      ),
+    ).toBeTruthy();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

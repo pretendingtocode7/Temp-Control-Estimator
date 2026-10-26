@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the offline v0.4.10 service-worker-fix release from a clean pinned commit.
+"""Prepare the offline v0.4.11 catalog-fix release from a clean pinned commit.
 
 Supply --commit as the complete current HEAD SHA and --output-root as a fresh
 directory inside this workspace but outside the repository. Only ignored npm
@@ -26,12 +26,15 @@ from datetime import datetime, timezone
 ORIGINAL_SHA = '0c1c04ef023b6aa094b2237e1f62452bed8f08d37ed4308e2d9aa0732937f56b'
 EXPECTED_LOCK_SHA = '95086183b87a15a142ea7423540c286ced2ac2711b2d7c9d1e0e1d6184ae642d'
 OLD_VERSION = '0.4.8'
-NEW_VERSION = '0.4.10'
+NEW_VERSION = '0.4.11'
 EXPECTED_TEST_COUNT = 124
 SLUG = 'temp-control-estimate-builder'
 ASSETS = ('estimate-builder.js', 'estimate-builder.css', 'service-worker.js', 'estimate-builder.js.map')
-OVERRIDE_PATH = 'app/reconstruction/runtime/public/class-enqueue.php'
-OVERRIDE_DESTINATION = 'public/class-enqueue.php'
+RUNTIME_OVERRIDES = (
+    ('app/reconstruction/runtime/public/class-enqueue.php', 'public/class-enqueue.php'),
+    ('app/reconstruction/runtime/includes/class-equipment-catalog.php', 'includes/class-equipment-catalog.php'),
+    ('app/reconstruction/runtime/admin/class-settings-page.php', 'admin/class-settings-page.php'),
+)
 PACKAGING_TOOL_PATH = 'app/reconstruction/tools/prepare-release.py'
 
 
@@ -74,6 +77,32 @@ def replace_once(path, pattern, replacement):
     if count != 1:
         raise RuntimeError('Expected exactly one version match in ' + str(path))
     path.write_text(new, encoding='utf-8')
+
+
+def stage_runtime_overrides(source, stage, original_paths, commit):
+    """Apply only the reviewed overrides; require changed, pinned source bytes."""
+    provenance = []
+    for source_path, destination_path in RUNTIME_OVERRIDES:
+        if destination_path not in original_paths:
+            raise RuntimeError('Runtime override destination is outside original allowlist: ' + destination_path)
+        override_source = source / source_path
+        if not override_source.is_file() or override_source.is_symlink():
+            raise RuntimeError('Pinned commit lacks required runtime override: ' + source_path)
+        original_hash = file_info(source / destination_path)['sha256']
+        override_hash = file_info(override_source)['sha256']
+        if override_hash == original_hash:
+            raise RuntimeError('Runtime override unexpectedly matches the old original: ' + source_path)
+        shutil.copyfile(str(override_source), str(stage / destination_path))
+        if file_info(stage / destination_path)['sha256'] != override_hash:
+            raise RuntimeError('Staged runtime override differs from pinned source: ' + destination_path)
+        provenance.append({
+            'source_path': source_path,
+            'staged_path': destination_path,
+            'source_commit': commit,
+            'original_reference_sha256': original_hash,
+            'override_sha256': override_hash,
+        })
+    return provenance
 
 
 def main():
@@ -204,19 +233,9 @@ def main():
         shutil.copyfile(str(source / relative), str(destination))
     for filename in ASSETS:
         shutil.copyfile(str(build_project / 'dist' / filename), str(stage / 'app/dist' / filename))
-    override_source = source / OVERRIDE_PATH
-    if not override_source.is_file() or override_source.is_symlink():
-        raise RuntimeError('Pinned commit lacks the service-worker delivery override')
-    shutil.copyfile(str(override_source), str(stage / OVERRIDE_DESTINATION))
-    override_provenance = {
-        'source_path': OVERRIDE_PATH,
-        'staged_path': OVERRIDE_DESTINATION,
-        'source_commit': commit,
-        'original_reference_sha256': file_info(source / OVERRIDE_DESTINATION)['sha256'],
-        'override_sha256': file_info(override_source)['sha256'],
-    }
-    if file_info(stage / OVERRIDE_DESTINATION)['sha256'] != override_provenance['override_sha256']:
-        raise RuntimeError('Staged override differs from the pinned source')
+    override_provenance = stage_runtime_overrides(
+        source, stage, {entry['path'] for entry in reference['files']}, commit,
+    )
 
     main_file = stage / (SLUG + '.php')
     replace_once(main_file, r'(^ \* Version:\s+)0\.4\.8(?=\s*$)', r'\g<1>' + NEW_VERSION)
@@ -274,7 +293,7 @@ def main():
         'build_mode': 'Exact clean pinned checkout; previously clean-installed locked dependencies; only ignored build/test outputs written',
         'build_assets_before_version_patch': build_assets,
         'staged_build_assets': staged_asset_info,
-        'runtime_override': override_provenance,
+        'runtime_overrides': override_provenance,
         'packaging_tool_sha256': file_info(source / PACKAGING_TOOL_PATH)['sha256'],
         'offline_validation': {'original_manifest_files': 45, 'frontend_tests_passed': EXPECTED_TEST_COUNT, 'javascript_syntax': 'passed', 'php_syntax': php_syntax, 'commands': ['npm run verify:reference', 'npm test', 'npm run build'], 'build_assets': 'Exact output of pinned commit; registration deliberately differs from older parity build', 'browser_or_live_checks': 'Not run by this packaging tool'},
         'intentional_version_changes': ['Plugin header Version: 0.4.8 -> ' + NEW_VERSION, 'TC_ESTIMATE_VERSION: 0.4.8 -> ' + NEW_VERSION, 'readme Stable tag: 0.4.8 -> ' + NEW_VERSION, 'Worker VERSION/cache suffix: ' + built_worker_version + ' -> ' + NEW_VERSION],
@@ -341,8 +360,8 @@ def main():
         'staged_file_count': len(actual),
         'php_file_count': sum(relative.endswith('.php') for relative in actual),
         'files': [dict({'path': SLUG + '/' + relative}, **file_info(stage / relative)) for relative in sorted(actual)],
-        'runtime_override': override_provenance,
-        'checks': {'original_manifest': 'passed', 'frontend_tests_passed': EXPECTED_TEST_COUNT, 'pinned_commit_build_hashes_recorded': 'passed', 'staged_assets_match_build': 'passed', 'runtime_override_matches_pinned_commit': 'passed', 'only_intended_version_deltas': 'passed', 'node_js_syntax': 'passed', 'node_worker_syntax': 'passed', 'php_syntax': php_syntax, 'zip_crc_path_type_allowlist_content': 'passed', 'credential_patterns': 'no findings'},
+        'runtime_overrides': override_provenance,
+        'checks': {'original_manifest': 'passed', 'frontend_tests_passed': EXPECTED_TEST_COUNT, 'pinned_commit_build_hashes_recorded': 'passed', 'staged_assets_match_build': 'passed', 'runtime_overrides_match_pinned_commit': 'passed', 'only_intended_version_deltas': 'passed', 'node_js_syntax': 'passed', 'node_worker_syntax': 'passed', 'php_syntax': php_syntax, 'zip_crc_path_type_allowlist_content': 'passed', 'credential_patterns': 'no findings'},
         'reproducibility': {'fixed_zip_timestamp': list(timestamp), 'python': sys.version.split()[0], 'zlib': zlib.ZLIB_VERSION, 'packaging_tool_sha256': file_info(Path(__file__))['sha256']},
         'conditions': provenance['unverified_conditions'],
     }

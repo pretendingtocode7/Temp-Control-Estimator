@@ -146,7 +146,7 @@ export function EquipmentPicker({ api, type, label, onClose, onPick }) {
           {status === "idle" && filteredItems.length === 0 && (
             <li className="tc-muted">
               {
-                "No eligible Books items match. Confirm cf_for_estimate is checked in Zoho Books."
+                "No active Package-tagged items match. Check the Package tag in Zoho Books."
               }
             </li>
           )}

@@ -40,6 +40,7 @@ final class Search_Equipment extends Endpoint_Base {
 				'category' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_key', 'enum' => array( 'package', 'ac', 'furnace', 'coil' ) ),
 				'btu' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'tons' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+				'efficiency' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'page' => array( 'type' => 'integer', 'required' => false, 'default' => 1, 'minimum' => 1 ),
 			),
 		) );
@@ -69,6 +70,7 @@ final class Search_Equipment extends Endpoint_Base {
 				'brand' => (string) $request->get_param( 'brand' ),
 				'btu' => $request->get_param( 'btu' ),
 				'tons' => $request->get_param( 'tons' ),
+				'efficiency' => $request->get_param( 'efficiency' ),
 				'page' => $request->get_param( 'page' ),
 				'limit' => $request->get_param( 'limit' ),
 			) );

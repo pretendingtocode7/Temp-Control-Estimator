@@ -37,6 +37,28 @@ export function sumEquipment(systems) {
   }
   return Math.round(subtotal * 100) / 100;
 }
+/** Purchase costs are separate from sales rates; unknown costs stay unknown. */
+export function equipmentCostSummary(systems) {
+  let knownSubtotal = 0;
+  let missingCount = 0;
+  let selectedCount = 0;
+  for (const system of systems || []) {
+    for (const item of Object.values(system.equipment || {})) {
+      if (!item) continue;
+      selectedCount += 1;
+      if (Number.isFinite(item.purchase_cost) && item.purchase_cost >= 0)
+        knownSubtotal += item.purchase_cost;
+      else missingCount += 1;
+    }
+  }
+  knownSubtotal = Math.round(knownSubtotal * 100) / 100;
+  return {
+    subtotal: missingCount === 0 ? knownSubtotal : null,
+    knownSubtotal,
+    missingCount,
+    selectedCount,
+  };
+}
 export function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }

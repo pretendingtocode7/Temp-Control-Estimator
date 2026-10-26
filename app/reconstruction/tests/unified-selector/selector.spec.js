@@ -8,16 +8,17 @@ import {
   ac,
   furnace,
   coil,
+  missingCost,
+  zeroCost,
   targetPackage,
   installFixture,
   requestEvidence,
 } from "./fixtures.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const evidence = path.resolve(
-  here,
-  "../../../../../unified-selector/browser-validation",
-);
+const evidence =
+  process.env.UNIFIED_SELECTOR_EVIDENCE ||
+  path.resolve(here, "../../../../../unified-selector/browser-validation");
 const repo = path.resolve(here, "../../../..");
 const app = path.resolve(here, "../..");
 const sha = (value) => createHash("sha256").update(value).digest("hex");
@@ -89,6 +90,9 @@ async function choose(page, system, category, item) {
     .getByRole("combobox", { name: "Tonnage", exact: true })
     .selectOption("");
   await dialog
+    .getByRole("combobox", { name: "Efficiency (%)", exact: true })
+    .selectOption("");
+  await dialog
     .getByRole("searchbox", { name: "Search equipment", exact: true })
     .fill(item.name);
   await dialog.getByText(item.name, { exact: true }).click();
@@ -137,6 +141,7 @@ async function capture(run, label, project, dialog) {
       dialog.getByRole("searchbox", { name: "Search equipment", exact: true }),
       dialog.getByRole("combobox", { name: "BTU", exact: true }),
       dialog.getByRole("combobox", { name: "Tonnage", exact: true }),
+      dialog.getByRole("combobox", { name: "Efficiency (%)", exact: true }),
       ...["Package", "AC", "Furnace", "Coil"].map((name) =>
         dialog.getByRole("button", { name, exact: true }),
       ),
@@ -205,10 +210,16 @@ async function report(run, project, scenario, details = {}) {
     mockedRequests: requestEvidence(run.fixture.requests),
     outsideRequests: run.fixture.outside,
     browserErrors: run.fixture.errors,
+    previewSource: run.fixture.previewSource,
+    detailLookups: run.fixture.details,
     ...details,
   };
   if (run.fixture.pdf) {
     result.pdf = run.fixture.pdf;
+    const pdfFile = `${project}-${scenario}.pdf`;
+    fs.writeFileSync(path.join(evidence, pdfFile), run.fixture.pdfBytes);
+    result.pdf.file = pdfFile;
+    result.pdf.sha256 = sha(run.fixture.pdfBytes);
     result.pdfPages = run.fixture.pdfImages.map((image, index) => {
       const file = `${project}-${scenario}-pdf-page-${index + 1}.jpg`;
       fs.writeFileSync(path.join(evidence, file), image.bytes);
@@ -237,20 +248,28 @@ test("combined Package filters, three catalog pages and category changes expose 
     dialog.getByRole("button", { name: "Package", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".tc-eqcard")).toHaveCount(50);
+  expect(
+    fixture.details,
+    "list loading does not eagerly hydrate all package costs",
+  ).toHaveLength(0);
   await expect(
     dialog.getByRole("button", { name: "Previous page", exact: true }),
   ).toBeDisabled();
   await dialog
     .getByRole("searchbox", { name: "Search equipment", exact: true })
     .fill("Fixture Combination");
-  await expect(dialog.locator(".tc-eqcard")).toHaveCount(3);
+  await expect(dialog.locator(".tc-eqcard")).toHaveCount(4);
   await dialog
     .getByRole("combobox", { name: "BTU", exact: true })
     .selectOption("100000");
-  await expect(dialog.locator(".tc-eqcard")).toHaveCount(2);
+  await expect(dialog.locator(".tc-eqcard")).toHaveCount(3);
   await dialog
     .getByRole("combobox", { name: "Tonnage", exact: true })
     .selectOption("1.5");
+  await expect(dialog.locator(".tc-eqcard")).toHaveCount(2);
+  await dialog
+    .getByRole("combobox", { name: "Efficiency (%)", exact: true })
+    .selectOption("96");
   await expect(dialog.locator(".tc-eqcard")).toHaveCount(1);
   await expect(
     dialog.getByText(targetPackage.name, { exact: true }),
@@ -269,6 +288,7 @@ test("combined Package filters, three catalog pages and category changes expose 
     q: "Fixture Combination",
     btu: "100000",
     tons: "1.5",
+    efficiency: "96",
     page: "1",
     limit: "50",
   });
@@ -280,6 +300,9 @@ test("combined Package filters, three catalog pages and category changes expose 
     .selectOption("");
   await dialog
     .getByRole("combobox", { name: "Tonnage", exact: true })
+    .selectOption("");
+  await dialog
+    .getByRole("combobox", { name: "Efficiency (%)", exact: true })
     .selectOption("");
   await expect(dialog.locator(".tc-eqcard")).toHaveCount(50);
   await dialog.getByRole("button", { name: "Next page", exact: true }).click();
@@ -304,6 +327,7 @@ test("combined Package filters, three catalog pages and category changes expose 
       .first()
       .getByText("Fixture Package 126", { exact: true }),
   ).toBeVisible();
+  expect(fixture.details).toHaveLength(1);
   const reopened = await openPicker(page);
   await reopened
     .getByRole("searchbox", { name: "Search equipment", exact: true })
@@ -337,22 +361,62 @@ test("combined Package filters, three catalog pages and category changes expose 
     page.locator(".tc-system").first().getByText(ac.name, { exact: true }),
   ).toBeVisible();
   await report(run, info.project.name, "selector-filters-pagination", {
-    packageFixtureCount: 133,
+    packageFixtureCount: 134,
     farItemOnThirdPageReachable: true,
-    compoundFilterCounts: [3, 2, 1],
+    compoundFilterCounts: [4, 3, 2, 1],
     staleCategoryResponseIgnored: true,
   });
 });
 
-test("Package and individual replacements keep one price, preserve other components, and flow through a mocked draft and real PDF", async ({
+test("purchase costs and project sales stay distinct through replacements, a real PHP proposal and PDF", async ({
   context,
 }, info) => {
   const run = await open(context),
     { page, fixture } = run;
   const first = page.locator(".tc-system").first();
+  await choose(page, first, "AC", missingCost);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue("");
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Purchase cost is missing for 1" }),
+  ).toContainText("Enter the equipment cost manually.");
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "4300",
+  );
+  await page.getByLabel("Project total", { exact: true }).fill("4500");
+  await capture(run, "missing-cost-no-sales-fallback", info.project.name);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await choose(page, first, "Furnace", zeroCost);
+  await first
+    .locator(".tc-slot")
+    .filter({ hasText: missingCost.name })
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue("0");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Purchase cost is missing" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "4500",
+  );
+  await page
+    .getByRole("button", { name: "Use equipment sales price", exact: true })
+    .click();
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "1800",
+  );
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await choose(page, first, "Package", targetPackage);
   await page.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(page.getByLabel("Equipment subtotal")).toHaveValue("8800");
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue(
+    "5200",
+  );
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "8800",
+  );
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await choose(page, first, "AC", ac);
   await expect(
@@ -372,7 +436,12 @@ test("Package and individual replacements keep one price, preserve other compone
     first.locator(".tc-slot").filter({ hasText: ac.name }).locator("textarea"),
   ).toHaveValue("Edited fixture AC scope — café");
   await page.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(page.getByLabel("Equipment subtotal")).toHaveValue("6950");
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue(
+    "3900",
+  );
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "6950",
+  );
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await choose(page, first, "Package", targetPackage);
   for (const replaced of [ac, furnace, coil])
@@ -391,13 +460,21 @@ test("Package and individual replacements keep one price, preserve other compone
     page.getByRole("button", { name: "Next", exact: true }),
   ).toBeDisabled();
   const second = page.locator(".tc-system").nth(1);
-  await second.getByLabel("System 2 label").fill("Upstairs fixture");
+  await second.getByLabel("System 2 label").fill("Second System");
   await choose(page, second, "AC", ac);
   await capture(run, "selected-package-and-second-system", info.project.name);
   await page.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(page.getByLabel("Equipment subtotal")).toHaveValue("12100");
-  await expect(page.getByLabel("Total project cost")).toHaveValue("");
-  await page.getByLabel("Total project cost").fill("14000");
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue(
+    "7100",
+  );
+  await expect(page.getByLabel("Project total", { exact: true })).toHaveValue(
+    "12100",
+  );
+  await page.getByLabel("Project total", { exact: true }).fill("14000");
+  await expect(page.getByLabel("Equipment subtotal (cost)")).toHaveValue(
+    "7100",
+  );
+  await capture(run, "purchase-cost-versus-project-sales", info.project.name);
   await page
     .getByLabel("Special notes (optional)")
     .fill("Unified selector fixture notes — café");
@@ -405,9 +482,73 @@ test("Package and individual replacements keep one price, preserve other compone
   await expect(
     page.getByRole("button", { name: "Create draft estimate", exact: true }),
   ).toBeEnabled();
-  await page
-    .getByRole("textbox", { name: "Edit polished proposal", exact: true })
-    .fill("Unified selector customer proposal — café");
+  const polished = page.getByRole("textbox", {
+    name: "Edit polished proposal",
+    exact: true,
+  });
+  await expect(polished).toContainText(targetPackage.name);
+  if (process.env.UNIFIED_SELECTOR_REQUIRE_PHP_FIXTURE === "1")
+    expect(fixture.previewSource.mode).toBe("actual-php-fixture");
+  const documentLayout = await polished.evaluate((root, packageName) => {
+    const headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6")];
+    const equipment = headings.find((heading) =>
+      /^equipment to be installed$/i.test(heading.textContent.trim()),
+    );
+    const scope = headings.find((heading) =>
+      /^scope of work$/i.test(heading.textContent.trim()),
+    );
+    const investment = headings.find((heading) =>
+      /^investment$/i.test(heading.textContent.trim()),
+    );
+    const sectionText = (heading) => {
+      if (!heading) return "";
+      const nodes = [];
+      for (
+        let next = heading.nextElementSibling;
+        next && !/^H[1-3]$/.test(next.tagName);
+        next = next.nextElementSibling
+      )
+        nodes.push(next.textContent);
+      return nodes.join(" ");
+    };
+    const text = root.textContent;
+    return {
+      equipmentFound: Boolean(equipment),
+      scopeFound: Boolean(scope),
+      investmentFound: Boolean(investment),
+      equipmentBeforeScope: Boolean(
+        equipment &&
+        scope &&
+        equipment.compareDocumentPosition(scope) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+      equipmentText: sectionText(equipment),
+      summaryText: sectionText(investment),
+      packageOccurrences: text.split(packageName).length - 1,
+      documentCurrency: [...text.matchAll(/\$\s*[\d,]+(?:\.\d{2})?/g)].map(
+        (match) => match[0],
+      ),
+      html: root.innerHTML,
+    };
+  }, targetPackage.name);
+  expect(documentLayout.equipmentFound).toBe(true);
+  expect(documentLayout.scopeFound).toBe(true);
+  expect(documentLayout.investmentFound).toBe(true);
+  expect(documentLayout.equipmentBeforeScope).toBe(true);
+  expect(documentLayout.equipmentText).toContain(targetPackage.name);
+  expect(documentLayout.equipmentText).toContain(ac.name);
+  expect(documentLayout.equipmentText).not.toMatch(/\$\s*\d/);
+  expect(documentLayout.packageOccurrences).toBe(1);
+  expect(documentLayout.summaryText).toContain("$14,000.00");
+  expect(documentLayout.summaryText).toContain("$4,900.00");
+  expect(documentLayout.documentCurrency).toEqual(["$14,000.00", "$4,900.00"]);
+  expect(documentLayout.html).not.toContain("purchase_cost");
+  expect(documentLayout.html).not.toContain("equipment_cost");
+  await capture(
+    run,
+    "php-customer-proposal-equipment-section",
+    info.project.name,
+  );
   expect(fixture.previews).toHaveLength(1);
   const payload = fixture.previews[0];
   expect(Object.keys(payload.systems[0].equipment)).toEqual(["package"]);
@@ -421,6 +562,9 @@ test("Package and individual replacements keep one price, preserve other compone
     total: 14000,
     deposit_percent: 35,
   });
+  expect(JSON.stringify(payload)).not.toContain("equipment_cost");
+  expect(JSON.stringify(payload)).not.toContain("purchase_cost");
+  expect(fixture.details).toHaveLength(8);
   await page.getByRole("tab", { name: "Books version", exact: true }).click();
   await expect(page.locator(".tc-books-line")).toHaveCount(2);
   const packageLine = page
@@ -453,6 +597,13 @@ test("Package and individual replacements keep one price, preserve other compone
     rate: 8800,
     description: "Reviewed Books package description",
   });
+  expect(generated.pricing).toEqual({
+    subtotal: 12100,
+    total: 14000,
+    deposit_percent: 35,
+  });
+  expect(JSON.stringify(generated)).not.toContain("equipment_cost");
+  expect(JSON.stringify(generated)).not.toContain("purchase_cost");
   await page
     .getByRole("tab", { name: "Polished version", exact: true })
     .click();
@@ -472,10 +623,23 @@ test("Package and individual replacements keep one price, preserve other compone
   expect(fixture.pdf.filename).toBe(
     "Temp-Control-Proposal-Fixture-Customer.pdf",
   );
+  expect(fixture.pdf.html).toContain(targetPackage.name);
+  expect(fixture.pdf.html).not.toContain("purchase_cost");
+  expect(fixture.pdf.html).not.toContain("equipment_cost");
+  expect(
+    [...fixture.pdf.html.matchAll(/\$\s*[\d,]+(?:\.\d{2})?/g)].map(
+      (match) => match[0],
+    ),
+  ).toEqual(["$14,000.00", "$4,900.00"]);
   await capture(run, "draft-and-synthetic-pdf-sent", info.project.name);
   await report(run, info.project.name, "package-individual-workflow", {
     canonicalPackageSlot: true,
-    observedSubtotals: [8800, 6950, 12100],
+    observedPurchaseCosts: [null, 0, 5200, 3900, 7100],
+    observedSalesSeeds: [4300, 1800, 8800, 6950, 12100],
+    manualSalesOverridePreserved: true,
+    explicitSalesResetRestoresAutoSeed: true,
+    detailHydrationPerPick: 8,
+    documentLayout,
     manualTotal: 14000,
     oneBooksPackageLine: true,
     noRealEmailOrBooksTransaction: true,

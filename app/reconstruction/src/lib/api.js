@@ -245,12 +245,22 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
       q,
       btu,
       tons,
+      efficiency,
       page = 1,
       limit = 50,
     } = {}) {
       const search = () =>
         requestWithReadRetry("GET", "/equipment", {
-          query: { selector: 1, category, q, btu, tons, page, limit },
+          query: {
+            selector: 1,
+            category,
+            q,
+            btu,
+            tons,
+            efficiency,
+            page,
+            limit,
+          },
         });
       return catalogWarmupPromise
         ? catalogWarmupPromise.catch(() => null).then(search)

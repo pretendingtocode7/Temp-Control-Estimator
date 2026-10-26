@@ -10,7 +10,7 @@ export const EQUIPMENT_CATEGORIES = [
 ];
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 200;
-const emptyFacets = () => ({ btus: [], tons: [] });
+const emptyFacets = () => ({ btus: [], tons: [], efficiencies: [] });
 
 function ratingOptions(values, selected) {
   const ratings = new Set(
@@ -38,6 +38,7 @@ export function EquipmentPicker({
     q: "",
     btu: "",
     tons: "",
+    efficiency: "",
     page: 1,
   });
   const [result, setResult] = React.useState(null);
@@ -45,16 +46,26 @@ export function EquipmentPicker({
   const [status, setStatus] = React.useState("loading");
   const [error, setError] = React.useState(null);
   const [retry, setRetry] = React.useState(0);
+  const [selection, setSelection] = React.useState({
+    status: "idle",
+    item: null,
+    error: null,
+  });
   const drawerRef = React.useRef(null);
   const helpId = React.useId();
   const previousFocus = React.useRef(document.activeElement);
   const requestGeneration = React.useRef(0);
   const currentFilters = React.useRef(filters);
+  const selectionAttempt = React.useRef(0);
+  const selectingItem = React.useRef(false);
 
   function invalidateResults() {
     // Invalidate before React renders the new filters: even an old retained
     // result click handler cannot select an item from the previous request.
     requestGeneration.current += 1;
+    selectionAttempt.current += 1;
+    selectingItem.current = false;
+    setSelection({ status: "idle", item: null, error: null });
     setResult(null);
     setStatus("loading");
     setError(null);
@@ -71,6 +82,9 @@ export function EquipmentPicker({
   React.useEffect(() => {
     const generation = ++requestGeneration.current;
     let cancelled = false;
+    selectionAttempt.current += 1;
+    selectingItem.current = false;
+    setSelection({ status: "idle", item: null, error: null });
     setResult(null);
     setStatus("loading");
     setError(null);
@@ -98,6 +112,9 @@ export function EquipmentPicker({
             : [],
           tons: Array.isArray(response?.facets?.tons)
             ? response.facets.tons
+            : [],
+          efficiencies: Array.isArray(response?.facets?.efficiencies)
+            ? response.facets.efficiencies
             : [],
         });
         setStatus("idle");
@@ -151,16 +168,60 @@ export function EquipmentPicker({
   const items = ready ? result.items : [];
   const btus = ratingOptions(facets.btus, filters.btu);
   const tons = ratingOptions(facets.tons, filters.tons);
+  const efficiencies = ratingOptions(
+    facets.efficiencies,
+    filters.efficiency,
+  ).filter((rating) => rating <= 100);
 
-  function pick(item) {
+  async function pick(item) {
     if (
       !ready ||
+      selectingItem.current ||
       result.generation !== requestGeneration.current ||
       item.selection_category !== currentFilters.current.category ||
       !result.items.some((candidate) => candidate.item_id === item.item_id)
     )
       return;
-    onPick(item);
+    const generation = requestGeneration.current;
+    const attempt = ++selectionAttempt.current;
+    selectingItem.current = true;
+    setSelection({ status: "loading", item, error: null });
+    try {
+      // Composite list rows can omit purchase mapping. Fetch only the chosen
+      // item's detail; never load details for every catalog result eagerly.
+      const detail = await api.getEquipment(item.item_id);
+      if (
+        generation !== requestGeneration.current ||
+        attempt !== selectionAttempt.current
+      )
+        return;
+      if (
+        !detail ||
+        detail.item_id !== item.item_id ||
+        detail.selection_category !== item.selection_category ||
+        detail.selection_category !== currentFilters.current.category ||
+        !Number.isFinite(detail.rate) ||
+        detail.rate !== item.rate
+      )
+        throw new Error(
+          "The item details no longer match these results. Refresh the catalog and try again.",
+        );
+      selectingItem.current = false;
+      setSelection({ status: "idle", item: null, error: null });
+      onPick({ ...item, ...detail });
+    } catch (requestError) {
+      if (
+        generation !== requestGeneration.current ||
+        attempt !== selectionAttempt.current
+      )
+        return;
+      selectingItem.current = false;
+      setSelection({
+        status: "error",
+        item,
+        error: requestError?.message || "Could not load the selected item.",
+      });
+    }
   }
 
   return (
@@ -202,7 +263,13 @@ export function EquipmentPicker({
                   onClick={() => {
                     if (filters.category !== key)
                       changeFilters(
-                        { category: key, btu: "", tons: "", page: 1 },
+                        {
+                          category: key,
+                          btu: "",
+                          tons: "",
+                          efficiency: "",
+                          page: 1,
+                        },
                         true,
                       );
                   }}
@@ -278,6 +345,34 @@ export function EquipmentPicker({
                 </span>
               )}
             </label>
+            <label className="tc-field tc-efficiency-field">
+              <span className="tc-field-label">Efficiency (%)</span>
+              <select
+                className="tc-input"
+                aria-label="Efficiency (%)"
+                aria-describedby={
+                  ready && efficiencies.length === 0
+                    ? `${helpId}-efficiency`
+                    : undefined
+                }
+                value={filters.efficiency}
+                onChange={(event) =>
+                  changeFilters({ efficiency: event.target.value, page: 1 })
+                }
+              >
+                <option value="">All efficiencies</option>
+                {efficiencies.map((rating) => (
+                  <option key={rating} value={String(rating)}>
+                    {rating}%
+                  </option>
+                ))}
+              </select>
+              {ready && efficiencies.length === 0 && (
+                <span className="tc-field-help" id={`${helpId}-efficiency`}>
+                  No efficiency ratings available
+                </span>
+              )}
+            </label>
           </div>
         </div>
         {status === "loading" && (
@@ -305,6 +400,23 @@ export function EquipmentPicker({
             {result.total} matching {result.total === 1 ? "item" : "items"}
           </p>
         )}
+        {selection.status === "loading" && (
+          <p className="tc-muted tc-selector-status" role="status">
+            Loading item cost…
+          </p>
+        )}
+        {selection.status === "error" && (
+          <div className="tc-err-block" role="alert">
+            <p>{selection.error}</p>
+            <button
+              type="button"
+              className="tc-btn tc-btn-ghost tc-btn-sm"
+              onClick={() => pick(selection.item)}
+            >
+              Retry item details
+            </button>
+          </div>
+        )}
         <ul
           className="tc-eqlist"
           aria-label="Equipment results"
@@ -315,7 +427,10 @@ export function EquipmentPicker({
               <button
                 type="button"
                 className="tc-eqcard"
-                disabled={item.selection_category !== filters.category}
+                disabled={
+                  selection.status === "loading" ||
+                  item.selection_category !== filters.category
+                }
                 onClick={() => pick(item)}
               >
                 <div className="tc-eqcard-head">
@@ -323,7 +438,7 @@ export function EquipmentPicker({
                     {item.brand || "Books item"}
                   </span>
                   <span className="tc-eqcard-price">
-                    {formatMoney(item.rate || 0)}
+                    Sales {formatMoney(item.rate || 0)}
                   </span>
                 </div>
                 <div className="tc-eqcard-model">
@@ -344,7 +459,10 @@ export function EquipmentPicker({
                   )}
                   {Number(item.tons) > 0 && <span>{item.tons} ton</span>}
                   {item.seer && <span>{item.seer} SEER</span>}
-                  {item.afue && <span>{item.afue}% AFUE</span>}
+                  {Number(item.efficiency_percent) > 0 &&
+                    Number(item.efficiency_percent) <= 100 && (
+                      <span>{item.efficiency_percent}% efficiency</span>
+                    )}
                   {item.stages && <span>{item.stages} stage</span>}
                 </div>
               </button>

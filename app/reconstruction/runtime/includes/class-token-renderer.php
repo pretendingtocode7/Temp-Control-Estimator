@@ -44,9 +44,13 @@ final class Token_Renderer {
 			return new WP_Error( 'tc_estimate_no_mustache', __( 'Mustache.php not installed. Run composer install.', 'tc-estimate' ), array( 'status' => 500 ) );
 		}
 		try {
+			// Customer documents use a separate copy. Catalog sales rates/costs remain
+			// available to the authenticated editor and Books transaction builder.
+			$view = $this->build_document_view( $view );
 			// The bundled fallback accepts compact identifier tokens. Normalize only
 			// their whitespace on this render copy; saved template posts stay intact.
 			$template_body = (string) preg_replace( '/\{\{(\{?)\s*([#^\/]?)\s*([a-zA-Z0-9_.]+)\s*(\}?)\}\}/', '{{$1$2$3$4}}', $template_body );
+			$template_body = $this->prepare_document_template( $template_body );
 			$rendered = $engine->render( $template_body, $view );
 			return $this->append_compatibility_sections( $rendered, $template_body, $view );
 		} catch ( \Throwable $e ) {
@@ -56,6 +60,58 @@ final class Token_Renderer {
 				array( 'status' => 500 )
 			);
 		}
+	}
+
+	/** Keep structured equipment prices and internal costs out of every template alias. */
+	private function build_document_view( array $view ): array {
+		$strip_financial_fields = static function ( array $value ) use ( &$strip_financial_fields ): array {
+			foreach ( $value as $key => $field ) {
+				if ( is_string( $key ) && preg_match( '/(?:^|_)(?:rate|cost|price|markup)(?:_|$)/i', $key ) ) {
+					unset( $value[ $key ] );
+				} elseif ( is_array( $field ) ) {
+					$value[ $key ] = $strip_financial_fields( $field );
+				}
+			}
+			if ( 'package' === ( $value['slot'] ?? null ) && '' !== trim( (string) ( $value['short_description'] ?? '' ) ) &&
+				in_array( trim( (string) $value['short_description'] ), array( trim( (string) ( $value['name'] ?? '' ) ), trim( (string) ( $value['display_name'] ?? '' ) ) ), true ) ) {
+				$value['short_description'] = '';
+			}
+			return $value;
+		};
+		$view['systems'] = $strip_financial_fields( (array) ( $view['systems'] ?? array() ) );
+		// A proposal summarizes the project sale and its deposit, never the tool's
+		// internal equipment subtotal. Rebates retain their existing separate view.
+		$view['pricing'] = array_intersect_key( (array) ( $view['pricing'] ?? array() ), array_flip( array(
+			'total', 'total_formatted', 'deposit_percent', 'deposit_amount', 'deposit_amount_formatted',
+		) ) );
+		return $view;
+	}
+
+	/** Adapt the verified legacy token layout on a copy, without editing stored posts. */
+	private function prepare_document_template( string $template_body ): string {
+		// This exact sales-subtotal row occurs in both inspected live templates and
+		// the seed layout. The customer summary keeps total and deposit only.
+		$subtotal_row = '<tr><td style="padding:6px 0;">Subtotal</td><td style="text-align:right;">{{pricing.subtotal_formatted}}</td></tr>';
+		$template_body = str_replace( $subtotal_row, '', $template_body );
+		// Avoid leaving the seed template's price-only permit separator behind.
+		$template_body = str_replace( '{{#is_permit}} — {{rate_formatted}}{{/is_permit}}', '', $template_body );
+		// The verified legacy condenser row closes a parenthesis even when SEER is
+		// absent. Keep each optional specification self-contained on this copy.
+		$legacy_specs = '{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}}{{/refrigerant}})';
+		$balanced_specs = '{{#seer}} ({{seer}} SEER){{/seer}}{{#tons}} — {{tons}} ton{{/tons}}{{#refrigerant}} — {{refrigerant}}{{/refrigerant}}';
+		$template_body = (string) preg_replace_callback( '/\{\{#condenser\}\}(.*?)\{\{\/condenser\}\}/s', static fn ( array $match ): string => str_replace( $legacy_specs, $balanced_specs, $match[0] ), $template_body );
+		if ( $this->template_has_package_support( $template_body ) ) {
+			return $template_body;
+		}
+		// The inspected legacy equipment list has #has_other/#other inside each
+		// #systems block. Insert at that token anchor, not by guessing HTML headings.
+		$package_row = '{{#package}}<li><strong>Package</strong> — {{display_name}}{{#short_description}} — {{short_description}}{{/short_description}}</li>{{/package}}' . "\n";
+		return (string) preg_replace_callback( '/\{\{#systems\}\}(.*?)\{\{\/systems\}\}/s', static function ( array $match ) use ( $package_row ): string {
+			if ( 1 !== substr_count( $match[1], '{{#has_other}}' ) || ! str_contains( $match[1], '{{#other}}' ) ) {
+				return $match[0];
+			}
+			return '{{#systems}}' . str_replace( '{{#has_other}}', $package_row . '{{#has_other}}', $match[1] ) . '{{/systems}}';
+		}, $template_body );
 	}
 
 	/**
@@ -77,14 +133,13 @@ final class Token_Renderer {
 				$package     = $system['package'];
 				$name        = trim( (string) ( $package['display_name'] ?? $package['name'] ?? 'Package' ) );
 				$description = trim( (string) ( $package['short_description'] ?? '' ) );
-				$amount      = (string) ( $package['rate_formatted'] ?? $this->format_money( (float) ( $package['rate'] ?? 0 ) ) );
 				$label       = trim( (string) ( $system['system_label'] ?? '' ) );
 				$detail      = '' !== $label ? '<strong>' . esc_html( $label ) . ':</strong> ' : '';
 				$detail     .= esc_html( $name );
 				if ( '' !== $description && $description !== $name && $description !== trim( (string) ( $package['name'] ?? '' ) ) ) {
 					$detail .= ' — ' . esc_html( $description );
 				}
-				$package_items[] = sprintf( '<li>%s — <strong>%s</strong></li>', $detail, esc_html( $amount ) );
+				$package_items[] = '<li>' . $detail . '</li>';
 			}
 			if ( ! empty( $package_items ) ) {
 				$sections[] = '<h3>Package</h3><ul>' . implode( '', $package_items ) . '</ul>';
@@ -113,12 +168,11 @@ final class Token_Renderer {
 				$permit      = $system['permit'];
 				$name        = trim( (string) ( $permit['display_name'] ?? $permit['name'] ?? 'Permit' ) );
 				$description = trim( (string) ( $permit['short_description'] ?? '' ) );
-				$amount      = (string) ( $permit['rate_formatted'] ?? $this->format_money( (float) ( $permit['rate'] ?? 0 ) ) );
 				$detail      = esc_html( $name );
 				if ( '' !== $description ) {
 					$detail .= ' — ' . esc_html( $description );
 				}
-				$permit_items[] = sprintf( '<li>%s — <strong>%s</strong></li>', $detail, esc_html( $amount ) );
+				$permit_items[] = '<li>' . $detail . '</li>';
 			}
 			if ( ! empty( $permit_items ) ) {
 				$sections[] = '<h3>Permit</h3><ul>' . implode( '', $permit_items ) . '</ul>';

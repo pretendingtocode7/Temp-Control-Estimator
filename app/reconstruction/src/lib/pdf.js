@@ -30,6 +30,71 @@ export function waitForImages(element) {
   );
 }
 
+/** Find a nearby blank row band without scanning or recapturing the whole page. */
+export function findPageSliceHeight(canvas, offset, maxHeight) {
+  const remaining = Math.floor(canvas.height - offset);
+  if (!Number.isFinite(remaining) || remaining <= 0) return 0;
+  const limit = Math.floor(maxHeight);
+  const fixed = Math.min(
+    remaining,
+    Number.isFinite(limit) && limit > 0 ? limit : 1,
+  );
+  if (fixed === remaining) return fixed;
+
+  const width = Math.floor(canvas.width);
+  if (!Number.isFinite(width) || width <= 0) return fixed;
+  const scanHeight = Math.max(1, Math.floor(fixed * 0.12));
+  const scanStart = offset + fixed - scanHeight;
+  try {
+    const context = canvas.getContext?.("2d");
+    const pixels = context?.getImageData?.(
+      0,
+      scanStart,
+      width,
+      scanHeight,
+    )?.data;
+    if (!pixels || pixels.length < width * scanHeight * 4) return fixed;
+
+    let bandStart = -1;
+    let paragraphCut = 0;
+    let smallCut = 0;
+    const finishBand = (end) => {
+      if (bandStart < 0) return;
+      const length = end - bandStart;
+      // An existing cut already inside the gap needs no earlier movement.
+      const cut =
+        end === scanHeight
+          ? fixed
+          : fixed - scanHeight + Math.floor((bandStart + end) / 2);
+      if (length >= 10) paragraphCut = cut;
+      else if (length >= 2) smallCut = cut;
+      bandStart = -1;
+    };
+    for (let row = 0; row < scanHeight; row += 1) {
+      let blank = true;
+      const rowEnd = (row + 1) * width * 4;
+      for (let pixel = row * width * 4; pixel < rowEnd; pixel += 4) {
+        if (
+          pixels[pixel + 3] !== 0 &&
+          (pixels[pixel] < 245 ||
+            pixels[pixel + 1] < 245 ||
+            pixels[pixel + 2] < 245)
+        ) {
+          blank = false;
+          break;
+        }
+      }
+      if (blank && bandStart < 0) bandStart = row;
+      else if (!blank) finishBand(row);
+    }
+    finishBand(scanHeight);
+    return Math.max(1, Math.min(fixed, paragraphCut || smallCut || fixed));
+  } catch {
+    // Tainted canvases and unavailable pixel access keep the fixed safe cut.
+    return fixed;
+  }
+}
+
 export async function createProposalAttachment({ html, customerName }) {
   if (!html) return null;
   const source = document.createElement("div");
@@ -60,6 +125,15 @@ export async function createProposalAttachment({ html, customerName }) {
       logging: false,
       windowWidth: 920,
     });
+    if (
+      !Number.isFinite(canvas.width) ||
+      canvas.width <= 0 ||
+      !Number.isFinite(canvas.height) ||
+      canvas.height <= 0
+    )
+      throw new Error(
+        "The polished proposal could not be rendered. Try again.",
+      );
     const pdf = new jsPDF({
       unit: "pt",
       format: "letter",
@@ -73,18 +147,15 @@ export async function createProposalAttachment({ html, customerName }) {
     const pageHeight = pdf.internal.pageSize.getHeight();
     const contentWidth = pageWidth - margin * 2;
     const contentHeight = pageHeight - margin * 2;
-    // The reference slices the captured canvas directly, including at text rows.
+    // Keep one capture and the original page geometry, moving cuts only into
+    // nearby whitespace so a footer or text line can continue on the next page.
     const sliceHeight = Math.max(
       1,
       Math.floor((contentHeight * canvas.width) / contentWidth),
     );
-    for (
-      let offset = 0, page = 0;
-      offset < canvas.height;
-      offset += sliceHeight, page += 1
-    ) {
+    for (let offset = 0, page = 0; offset < canvas.height; page += 1) {
       if (page > 0) pdf.addPage();
-      const height = Math.min(sliceHeight, canvas.height - offset);
+      const height = findPageSliceHeight(canvas, offset, sliceHeight);
       const slice = document.createElement("canvas");
       slice.width = canvas.width;
       slice.height = height;
@@ -112,6 +183,7 @@ export async function createProposalAttachment({ html, customerName }) {
         undefined,
         "FAST",
       );
+      offset += height;
     }
     const dataUri = pdf.output("datauristring");
     const data = dataUri.slice(dataUri.indexOf(",") + 1);

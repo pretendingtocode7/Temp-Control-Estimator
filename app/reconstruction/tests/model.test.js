@@ -8,6 +8,7 @@ import {
 import {
   formatMoney,
   sumEquipment,
+  equipmentCostSummary,
   filterEquipment,
   newIdempotencyKey,
 } from "../src/lib/utils.js";
@@ -43,7 +44,14 @@ const fixture = () => ({
       },
     },
   ],
-  pricing: { subtotal: 3200, total: 4000, deposit_percent: 35 },
+  pricing: {
+    subtotal: 3200,
+    equipment_cost: 2000,
+    equipment_cost_manual: true,
+    total: 4000,
+    total_manual: true,
+    deposit_percent: 35,
+  },
   preview_html: "<p>Edited polished proposal</p>",
   books_edits: {
     line_items: [
@@ -55,7 +63,7 @@ const fixture = () => ({
 });
 
 describe("reference-compatible draft model", () => {
-  it("starts fresh in memory with the v0.4.8 defaults", () => {
+  it("starts fresh in memory with automatic cost and sales pricing enabled", () => {
     const first = createInitialState(),
       second = createInitialState();
     expect(first.step).toBe("customer");
@@ -67,7 +75,10 @@ describe("reference-compatible draft model", () => {
     });
     expect(first.pricing).toEqual({
       subtotal: 0,
+      equipment_cost: 0,
+      equipment_cost_manual: false,
       total: 0,
+      total_manual: false,
       deposit_percent: 35,
     });
     expect(first.options).toMatchObject({
@@ -168,6 +179,14 @@ describe("reference-compatible draft model", () => {
     expect(payload).not.toHaveProperty("idempotency_key");
     expect(JSON.stringify(payload)).not.toContain("fixture@example.test");
     expect(buildPayload(draft, false)).not.toHaveProperty("books_edits");
+    expect(payload.pricing).toEqual({
+      subtotal: 3200,
+      total: 4000,
+      deposit_percent: 35,
+    });
+    expect(payload.pricing).not.toHaveProperty("equipment_cost");
+    expect(payload.pricing).not.toHaveProperty("equipment_cost_manual");
+    expect(payload.pricing).not.toHaveProperty("total_manual");
   });
   it("keeps a selected package as one priced item and sends its canonical slot without hydrated component data", () => {
     const draft = fixture();
@@ -179,12 +198,26 @@ describe("reference-compatible draft model", () => {
         tons: 1.5,
         btu_input: 100000,
         rate: 6200,
+        purchase_cost: 3200,
         description: "Edited complete package scope",
-        component_items: [{ item_id: "child", tons: 2, rate: 900 }],
+        component_items: [
+          { item_id: "child", tons: 2, rate: 900, purchase_cost: 700 },
+        ],
       },
-      permit: { item_id: "permit", description: "Municipal permit", rate: 125 },
+      permit: {
+        item_id: "permit",
+        description: "Municipal permit",
+        rate: 125,
+        purchase_cost: 100,
+      },
     };
     expect(sumEquipment(draft.systems)).toBe(6325);
+    expect(equipmentCostSummary(draft.systems)).toEqual({
+      subtotal: 3300,
+      knownSubtotal: 3300,
+      missingCount: 0,
+      selectedCount: 2,
+    });
     expect(buildPayload(draft).systems[0].equipment).toEqual({
       package: {
         item_id: "2273343000000787099",
@@ -196,9 +229,161 @@ describe("reference-compatible draft model", () => {
       "component_items",
     );
   });
+
+  it("updates sales total and purchase cost atomically with system selection until each is explicitly overridden", () => {
+    const systems = (rate, purchase_cost) => [
+      {
+        system_number: 1,
+        system_label: "Main System",
+        equipment: { package: { item_id: "package", rate, purchase_cost } },
+      },
+    ];
+    let state = draftReducer(createInitialState(), {
+      type: "setSystems",
+      systems: systems(5000, 3000),
+    });
+    expect(state.pricing).toMatchObject({
+      subtotal: 5000,
+      total: 5000,
+      total_manual: false,
+      equipment_cost: 3000,
+      equipment_cost_manual: false,
+    });
+    state = draftReducer(state, {
+      type: "setPricing",
+      pricing: { total: 6200 },
+    });
+    state = draftReducer(state, {
+      type: "setPricing",
+      pricing: { equipment_cost: 3500 },
+    });
+    expect(state.pricing).toMatchObject({
+      total_manual: true,
+      equipment_cost_manual: true,
+    });
+    state = draftReducer(state, {
+      type: "setSystems",
+      systems: systems(5500, 3100),
+    });
+    expect(state.pricing).toMatchObject({
+      subtotal: 5500,
+      total: 6200,
+      equipment_cost: 3500,
+    });
+    state = draftReducer(state, {
+      type: "setPricing",
+      pricing: { total: state.pricing.subtotal, total_manual: false },
+    });
+    state = draftReducer(state, {
+      type: "setSystems",
+      systems: systems(5800, 3300),
+    });
+    expect(state.pricing).toMatchObject({
+      subtotal: 5800,
+      total: 5800,
+      total_manual: false,
+      equipment_cost: 3500,
+      equipment_cost_manual: true,
+    });
+    expect(buildPayload(state).pricing).toEqual({
+      subtotal: 5800,
+      total: 5800,
+      deposit_percent: 35,
+    });
+  });
+
+  it("keeps unknown purchase cost unknown instead of substituting sales and treats explicit zero overrides as manual", () => {
+    const systems = [
+      {
+        system_number: 1,
+        system_label: "Main System",
+        equipment: {
+          furnace: { item_id: "furnace", rate: 5000, purchase_cost: null },
+          permit: { item_id: "permit", rate: 125, purchase_cost: 0 },
+        },
+      },
+    ];
+    let state = draftReducer(createInitialState(), {
+      type: "setSystems",
+      systems,
+    });
+    expect(state.pricing).toMatchObject({
+      subtotal: 5125,
+      total: 5125,
+      equipment_cost: null,
+      equipment_cost_manual: false,
+    });
+    state = draftReducer(state, {
+      type: "setPricing",
+      pricing: { equipment_cost: 0, total: 0 },
+    });
+    expect(state.pricing).toMatchObject({
+      equipment_cost: 0,
+      equipment_cost_manual: true,
+      total: 0,
+      total_manual: true,
+    });
+    state = draftReducer(state, { type: "setSystems", systems: [] });
+    expect(state.pricing).toMatchObject({
+      subtotal: 0,
+      total: 0,
+      equipment_cost: 0,
+      equipment_cost_manual: true,
+    });
+    state = draftReducer(state, {
+      type: "setPricing",
+      pricing: {
+        equipment_cost: 0,
+        equipment_cost_manual: false,
+        total: 0,
+        total_manual: false,
+      },
+    });
+    state = draftReducer(state, { type: "setSystems", systems });
+    expect(state.pricing).toMatchObject({
+      subtotal: 5125,
+      total: 5125,
+      equipment_cost: null,
+      equipment_cost_manual: false,
+    });
+  });
 });
 
 describe("pricing, catalog search and identity utilities", () => {
+  it("reports known purchase cost separately from sales and never invents missing purchase costs", () => {
+    const systems = [
+      {
+        equipment: {
+          known: { item_id: "known", purchase_cost: 123.455, rate: 1000 },
+          zero: { item_id: "zero", purchase_cost: 0, rate: 200 },
+          unknown: { item_id: "unknown", purchase_cost: null, rate: 500 },
+          text: { item_id: "text", purchase_cost: "15", rate: 500 },
+          negative: { item_id: "negative", purchase_cost: -1, rate: 500 },
+          infinite: { item_id: "infinite", purchase_cost: Infinity, rate: 500 },
+          unused: null,
+        },
+      },
+    ];
+    expect(equipmentCostSummary(systems)).toEqual({
+      subtotal: null,
+      knownSubtotal: 123.46,
+      missingCount: 4,
+      selectedCount: 6,
+    });
+    expect(sumEquipment(systems)).toBe(3200);
+    expect(equipmentCostSummary(null)).toEqual({
+      subtotal: 0,
+      knownSubtotal: 0,
+      missingCount: 0,
+      selectedCount: 0,
+    });
+    expect(
+      equipmentCostSummary([
+        { equipment: { a: { purchase_cost: 0.1 }, b: { purchase_cost: 0.2 } } },
+      ]).subtotal,
+    ).toBe(0.3);
+  });
+
   it("rounds finite numeric rates only; project total/rebates are separate", () => {
     expect(
       sumEquipment([

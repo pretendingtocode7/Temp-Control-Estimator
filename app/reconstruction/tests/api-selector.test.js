@@ -8,14 +8,53 @@ function response(data) {
 }
 
 describe("shared equipment selector API", () => {
+  it("keeps unknown cost and efficiency nullable and omits an unselected efficiency filter", async () => {
+    const envelope = {
+      items: [
+        {
+          item_id: "ac",
+          selection_category: "ac",
+          rate: 5000,
+          purchase_cost: null,
+          efficiency_percent: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      per_page: 50,
+      has_more: false,
+      facets: { btus: [], tons: [], efficiencies: [] },
+    };
+    const fetch = vi.fn().mockResolvedValue(response(envelope));
+    vi.stubGlobal("fetch", fetch);
+    const api = createApi({
+      restUrl: "https://fixture.test/wp-json/tc-estimate/v1",
+      nonce: "synthetic",
+    });
+    await expect(
+      api.searchEquipmentSelector({ category: "ac", efficiency: "" }),
+    ).resolves.toEqual(envelope);
+    expect(new URL(fetch.mock.calls[0][0]).searchParams.has("efficiency")).toBe(
+      false,
+    );
+  });
+
   it("sends combined server filters and pagination without truncating the response envelope", async () => {
     const envelope = {
-      items: [{ item_id: "10000000001", selection_category: "package" }],
+      items: [
+        {
+          item_id: "10000000001",
+          selection_category: "package",
+          efficiency_percent: 95,
+          purchase_cost: 3000,
+          rate: 5000,
+        },
+      ],
       total: 123,
       page: 2,
       per_page: 50,
       has_more: true,
-      facets: { btus: [80000, 100000], tons: [1.5, 2] },
+      facets: { btus: [80000, 100000], tons: [1.5, 2], efficiencies: [85, 95] },
     };
     const fetch = vi.fn().mockResolvedValue(response(envelope));
     vi.stubGlobal("fetch", fetch);
@@ -29,6 +68,7 @@ describe("shared equipment selector API", () => {
         q: "AC + furnace",
         btu: 100000,
         tons: 1.5,
+        efficiency: 95,
         page: 2,
       }),
     ).resolves.toEqual(envelope);
@@ -40,6 +80,7 @@ describe("shared equipment selector API", () => {
       q: "AC + furnace",
       btu: "100000",
       tons: "1.5",
+      efficiency: "95",
       page: "2",
       limit: "50",
     });
@@ -63,7 +104,7 @@ describe("shared equipment selector API", () => {
           page: 1,
           per_page: 1,
           has_more: false,
-          facets: { btus: [], tons: [] },
+          facets: { btus: [], tons: [], efficiencies: [] },
         }),
       );
     vi.stubGlobal("fetch", fetch);

@@ -136,7 +136,7 @@ namespace {
 		return array( 'code' => 0, 'items' => $items, 'page_context' => array( 'page' => $page, 'has_more_page' => $has_more ) );
 	}
 	function catalog_key( string $org = ORG_A, string $tag = TAG_A, string $option = OPTION_A ): string {
-		return 'books_items_package_tag_v2_' . $org . '_' . $tag . '_' . $option;
+		return 'books_items_package_tag_v3_' . $org . '_' . $tag . '_' . $option;
 	}
 	function catalog_calls( string $path, ?string $org = null ): array {
 		return array_values( array_filter( Zoho_API::instance()->calls, static fn ( array $call ): bool =>
@@ -379,6 +379,14 @@ namespace {
 		'category and equipment type conflict' => static function ( array $row ): array { $row['selection_category'] = 'package'; return $row; },
 		'string tonnage' => static function ( array $row ): array { $row['tons'] = '1.5'; return $row; },
 		'string BTU' => static function ( array $row ): array { $row['btu_input'] = '80000'; return $row; },
+		'missing efficiency' => static function ( array $row ): array { unset( $row['efficiency_percent'] ); return $row; },
+		'string efficiency' => static function ( array $row ): array { $row['efficiency_percent'] = '96'; return $row; },
+		'out-of-range efficiency' => static function ( array $row ): array { $row['efficiency_percent'] = 101.0; return $row; },
+		'efficiency compatibility drift' => static function ( array $row ): array { $row['afue'] = 96.0; return $row; },
+		'missing purchase cost' => static function ( array $row ): array { unset( $row['purchase_cost'] ); return $row; },
+		'negative purchase cost' => static function ( array $row ): array { $row['purchase_cost'] = -1.0; return $row; },
+		'string purchase cost' => static function ( array $row ): array { $row['purchase_cost'] = '1250'; return $row; },
+		'unknown cost claimed known' => static function ( array $row ): array { $row['purchase_cost_status'] = 'known'; return $row; },
 	);
 	foreach ( $cache_mutations as $label => $mutate ) {
 		run_catalog_case( 'rebuilds invalid cached metadata: ' . $label, function () use ( $mutate ): void {
@@ -587,7 +595,7 @@ namespace {
 		$catalog = reset_catalog_test();
 		route_catalog( '/items', catalog_page( array( catalog_item( ITEM_A, array( 'is_combo_product' => true, 'name' => 'Synthetic Package no ratings' ) ) ) ) );
 		same_catalog( 1, $catalog->search_selector()['total'], 'Unfiltered selection includes unknown ratings' );
-		same_catalog( array( 'btus' => array(), 'tons' => array() ), $catalog->search_selector()['facets'], 'Missing ratings do not create a zero facet' );
+		same_catalog( array( 'btus' => array(), 'tons' => array(), 'efficiencies' => array() ), $catalog->search_selector()['facets'], 'Missing ratings do not create a zero facet' );
 		same_catalog( 0, $catalog->search_selector( array( 'btu' => 80000 ) )['total'], 'Unknown BTU cannot satisfy a selected BTU' );
 		same_catalog( 0, $catalog->search_selector( array( 'tons' => 2 ) )['total'], 'Unknown tonnage cannot satisfy selected tonnage' );
 	} );
@@ -600,10 +608,135 @@ namespace {
 			array( 'tons' => -1 ), array( 'tons' => 'not-tonnage' ), array( 'tons' => array( 2 ) ),
 			array( 'page' => 'later' ), array( 'page' => '1x' ), array( 'page' => array( 1 ) ),
 			array( 'limit' => 'many' ), array( 'limit' => '50x' ), array( 'limit' => array( 50 ) ),
+			array( 'efficiency' => 0 ), array( 'efficiency' => -1 ), array( 'efficiency' => 101 ),
+			array( 'efficiency' => '96 SEER' ), array( 'efficiency' => '96% extra' ), array( 'efficiency' => array( 96 ) ),
 		) as $args ) {
 			selector_error( $catalog->search_selector( $args ) );
 		}
 		same_catalog( array(), catalog_calls( '/items' ), 'Malformed filters fail before catalog reads' );
+	} );
+
+	run_catalog_case( 'AFUE percentages use complete structured values and explicit parent labels only', function (): void {
+		foreach ( array( 80, '96', '96%', '96.5 %', 100.0 ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'cf_afue' => $raw, 'name' => 'Synthetic Furnace - 80% AFUE' ) );
+			$expected = (float) str_replace( '%', '', (string) $raw );
+			same_catalog( $expected, $item['efficiency_percent'], 'Structured AFUE is a percentage, without fractional conversion' );
+			same_catalog( $expected, $item['afue'], 'Existing AFUE consumers receive the same normalized value' );
+		}
+		foreach ( array(
+			array( 'custom_fields' => array( array( 'api_name' => 'AFUE_Percent', 'value' => '97%' ) ) ),
+			array( 'custom_field_hash' => array( 'cf_afue' => '97%' ) ),
+		) as $shape ) {
+			$item = normalize_catalog_fixture( $shape );
+			same_catalog( 97.0, $item['efficiency_percent'], 'Supported provider custom-field shapes supply AFUE' );
+		}
+		foreach ( array( 'Synthetic Package - 96% AFUE', 'Synthetic Furnace AFUE: 96%', 'Synthetic Furnace 96% afue, 18 SEER' ) as $name ) {
+			$item = normalize_catalog_fixture( array( 'name' => $name ) );
+			same_catalog( 96.0, $item['efficiency_percent'], 'Explicit labeled name percentage supplies a missing structured AFUE' );
+		}
+		foreach ( array( 'Synthetic AC 18 SEER', 'Synthetic Model-AFUE96', 'Synthetic 96% efficiency claim', 'Synthetic 96%', 'Synthetic 80–96% AFUE', 'Synthetic 80% to 96% AFUE', 'Synthetic 80% AFUE / 96% AFUE' ) as $name ) {
+			$item = normalize_catalog_fixture( array( 'name' => $name ) );
+			same_catalog( null, $item['efficiency_percent'], 'Unlabeled percentages, SEER, models and ambiguous AFUE do not invent efficiency' );
+		}
+	} );
+
+	run_catalog_case( 'invalid and conflicting structured AFUE suppresses name fallback', function (): void {
+		foreach ( array( 0, -1, 101, true, false, array( 96 ), 'NaN', 'Infinity', '96 SEER', '96foo%', '80-96%', '0.96fraction' ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'cf_afue' => $raw, 'name' => 'Synthetic Furnace - 96% AFUE' ) );
+			same_catalog( null, $item['efficiency_percent'], 'Malformed or out-of-range structured percentage stays unknown' );
+		}
+		$item = normalize_catalog_fixture( array( 'cf_afue' => 80, 'custom_field_hash' => array( 'cf_afue' => 96 ), 'name' => 'Synthetic Furnace - 97% AFUE' ) );
+		same_catalog( null, $item['efficiency_percent'], 'Conflicting structured shapes do not pick an arbitrary efficiency or fall back' );
+		$item = normalize_catalog_fixture( array( 'cf_afue' => 80, 'name' => 'Synthetic Furnace - 97% AFUE' ) );
+		same_catalog( 80.0, $item['efficiency_percent'], 'Valid structured AFUE takes precedence over name evidence' );
+	} );
+
+	run_catalog_case( 'efficiency combines with all selector filters before pagination and preserves full facets', function (): void {
+		$catalog = reset_catalog_test();
+		$items = array();
+		for ( $index = 0; $index < 150; $index++ ) {
+			$items[] = catalog_item( '95' . str_pad( (string) $index, 9, '0', STR_PAD_LEFT ), array(
+				'is_combo_product' => true, 'name' => 'Synthetic Package ' . $index,
+				'cf_btu_input' => 100000, 'cf_tons' => 1.5, 'cf_afue' => 149 === $index ? 97 : ( 148 === $index ? 96 : 80 ),
+				'cf_mfg_part_number' => 149 === $index ? 'LATE-TARGET' : 'OTHER',
+			) );
+		}
+		$items[] = catalog_item( '96000000001', array( 'is_combo_product' => true, 'name' => 'Synthetic Package without efficiency', 'cf_btu_input' => 100000, 'cf_tons' => 1.5 ) );
+		$items[] = catalog_item( '96000000002', array( 'cf_equipment_type' => 'condenser', 'name' => 'Synthetic AC 18 SEER', 'cf_tons' => 1.5 ) );
+		route_catalog( '/items', catalog_page( $items ) );
+		$all = $catalog->search_selector();
+		same_catalog( 151, $all['total'], 'All efficiencies includes packages with an unknown percentage' );
+		same_catalog( array( 80.0, 96.0, 97.0 ), $all['facets']['efficiencies'], 'Category-wide efficiencies are sorted numeric percentages' );
+		$filtered = $catalog->search_selector( array( 'category' => 'package', 'q' => 'late-target', 'brand' => 'fixture brand', 'btu' => 100000, 'tons' => 1.5, 'efficiency' => '97%', 'limit' => 1 ) );
+		same_catalog( array( $items[149]['item_id'] ), array_column( $filtered['items'], 'item_id' ), 'Efficiency AND text/brand/capacities finds a match beyond the first hundred' );
+		same_catalog( 1, $filtered['total'], 'Combined total is calculated before paging' );
+		same_catalog( $all['facets'], $filtered['facets'], 'Efficiency does not narrow the category-wide facets' );
+		same_catalog( 0, $catalog->search_selector( array( 'q' => 'late-target', 'efficiency' => 96 ) )['total'], 'Efficiency is not ORed with the other conditions' );
+		same_catalog( 1, $catalog->search_selector( array( 'efficiency' => 97 ) )['total'], 'Unknown efficiency cannot satisfy an active filter' );
+		$ac = $catalog->search_selector( array( 'category' => 'ac' ) );
+		same_catalog( array(), $ac['facets']['efficiencies'], 'SEER cannot become a percent facet in AC category' );
+		same_catalog( 0, $catalog->search_selector( array( 'category' => 'ac', 'efficiency' => 18 ) )['total'], 'SEER cannot satisfy an efficiency percentage filter' );
+	} );
+
+	run_catalog_case( 'purchase cost uses complete actual purchase rates independently of sales amounts', function (): void {
+		foreach ( array( 0, 1250.25, '1,250.25' ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'purchase_rate' => $raw, 'rate' => 9000 ) );
+			$expected = (float) str_replace( ',', '', (string) $raw );
+			same_catalog( $expected, $item['purchase_cost'], 'Explicit nonnegative purchase rate establishes component cost' );
+			same_catalog( 'books_purchase_rate', $item['purchase_cost_source'], 'Known direct purchase cost records its actual source' );
+			same_catalog( 'known', $item['purchase_cost_status'], 'Explicit zero is known for a noncomposite' );
+			same_catalog( 9000.0, $item['rate'], 'Sales rate stays separate from internal purchase cost' );
+		}
+		foreach ( array( null, true, false, array( 1250 ), -1, INF, NAN, 'NaN', 'Infinity', '1250abc', '$1250', '1,25.00', '' ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'purchase_rate' => $raw, 'rate' => 9000, 'sales_rate' => 8500, 'cf_markup' => 50 ) );
+			same_catalog( null, $item['purchase_cost'], 'Missing or malformed purchase rate never borrows sales or markup' );
+			same_catalog( null, $item['purchase_cost_source'], 'Unknown cost has no asserted provider source' );
+			same_catalog( 'unknown', $item['purchase_cost_status'], 'Unknown cost is explicit rather than coerced to zero' );
+		}
+		$item = normalize_catalog_fixture( array( 'Purchase_Cost' => 1234, 'custom_fields' => array( array( 'api_name' => 'purchase_cost', 'value' => 4321 ) ) ) );
+		same_catalog( null, $item['purchase_cost'], 'Unverified aliases do not substitute for the actual purchase_rate field' );
+	} );
+
+	run_catalog_case( 'composite detail costs use complete mapped purchase quantities without expanding the sales item', function (): void {
+		$rows = array(
+			array( 'item_id' => '97000000001', 'is_component' => true, 'is_combo_product' => false, 'purchase_rate' => 120, 'mapped_quantity' => 2, 'rate' => 9999 ),
+			array( 'item_id' => '97000000002', 'is_component' => true, 'is_combo_product' => false, 'purchase_rate' => 50, 'mapped_quantity' => 0.5, 'rate' => 8888 ),
+		);
+		$item = normalize_catalog_fixture( array( 'is_combo_product' => true, 'purchase_rate' => 0, 'mapped_items' => $rows, 'rate' => 9000 ) );
+		same_catalog( 265.0, $item['purchase_cost'], 'Complete component purchase rates times actual quantities establish kit cost' );
+		same_catalog( 'books_mapped_items', $item['purchase_cost_source'], 'Derived cost identifies the explicit provider mapping' );
+		same_catalog( 'known', $item['purchase_cost_status'], 'Complete flat provider mapping is known' );
+		same_catalog( 9000.0, $item['rate'], 'Package retains its one actual sales rate' );
+		same_catalog( 'package', $item['selection_category'], 'Cost calculation does not expand or reclassify the package' );
+		foreach ( $rows as &$row ) { $row['purchase_rate'] = 0; }
+		unset( $row );
+		$item = normalize_catalog_fixture( array( 'is_combo_product' => true, 'purchase_rate' => 0, 'mapped_items' => $rows ) );
+		same_catalog( 0.0, $item['purchase_cost'], 'Explicit complete all-zero mapping can establish a real zero cost' );
+		same_catalog( 'books_mapped_items', $item['purchase_cost_source'], 'Mapped zero is distinguished from an unhydrated zero parent' );
+		$item = normalize_catalog_fixture( array( 'is_combo_product' => true, 'purchase_rate' => 500, 'mapped_items' => array( 'malformed' ) ) );
+		same_catalog( 500.0, $item['purchase_cost'], 'An explicit positive parent purchase rate remains authoritative' );
+		same_catalog( 'books_purchase_rate', $item['purchase_cost_source'], 'Authoritative parent cost does not depend on component sales' );
+	} );
+
+	run_catalog_case( 'unhydrated or incomplete composite costs remain unknown without partial sums', function (): void {
+		$row = array( 'item_id' => '97000000001', 'is_component' => true, 'is_combo_product' => false, 'purchase_rate' => 120, 'mapped_quantity' => 1 );
+		$bad_mappings = array( null, array(), array( 'bad-row' ), array( 'not-a-list' => $row ), array( $row, $row ) );
+		foreach ( array(
+			array( 'purchase_rate' => null ), array( 'purchase_rate' => -1 ), array( 'purchase_rate' => '120junk' ),
+			array( 'mapped_quantity' => null ), array( 'mapped_quantity' => 0 ), array( 'mapped_quantity' => -1 ), array( 'mapped_quantity' => true ),
+			array( 'is_component' => false ), array( 'is_combo_product' => true ), array( 'is_combo_product' => null ),
+			array( 'item_id' => ITEM_A ), array( 'item_id' => 'invalid' ), array( 'mapped_items' => array( $row ) ),
+		) as $change ) { $bad_mappings[] = array( $row, array_replace( $row, array( 'item_id' => '97000000002' ), $change ) ); }
+		$too_many = array();
+		for ( $index = 0; $index <= 100; $index++ ) {
+			$too_many[] = array_replace( $row, array( 'item_id' => '98' . str_pad( (string) $index, 9, '0', STR_PAD_LEFT ) ) );
+		}
+		$bad_mappings[] = $too_many;
+		foreach ( $bad_mappings as $mapping ) {
+			$item = normalize_catalog_fixture( array( 'is_combo_product' => true, 'purchase_rate' => 0, 'mapped_items' => $mapping, 'rate' => 9000 ) );
+			same_catalog( null, $item['purchase_cost'], 'A zero parent with incomplete, nested or unbounded mapping has unknown cost' );
+			same_catalog( 'unknown', $item['purchase_cost_status'], 'Incomplete mapping cannot claim a partial cost as complete' );
+		}
 	} );
 
 	run_catalog_case( 'canonical slots accept one package or separate components with matching accessories', function (): void {

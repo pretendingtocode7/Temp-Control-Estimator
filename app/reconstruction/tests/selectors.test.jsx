@@ -14,6 +14,7 @@ import { EquipmentPicker } from "../src/components/EquipmentPicker.jsx";
 import { SystemsStep } from "../src/components/SystemsStep.jsx";
 import { PricingStep } from "../src/components/PricingStep.jsx";
 import { sumEquipment } from "../src/lib/utils.js";
+import { draftReducer } from "../src/model.js";
 
 afterEach(() => {
   cleanup();
@@ -54,7 +55,7 @@ function equipmentResponse(items, overrides = {}) {
     page: 1,
     per_page: 50,
     has_more: false,
-    facets: { btus: [80000, 100000], tons: [1.5, 2] },
+    facets: { btus: [80000, 100000], tons: [1.5, 2], efficiencies: [85, 95] },
     ...overrides,
   };
 }
@@ -74,15 +75,24 @@ function packageItem(overrides = {}) {
     is_composite: true,
     tons: 1.5,
     btu_input: 100000,
+    efficiency_percent: 95,
+    purchase_cost: 3000,
     short_description: "Complete catalog package scope",
     rate: 5000,
     ...overrides,
   };
 }
+function detailLookup(...items) {
+  return vi.fn(async (id) => {
+    const item = items.find((candidate) => candidate.item_id === id);
+    if (!item) throw new Error("Unexpected fixture item detail request");
+    return item;
+  });
+}
 function renderPicker(api, props = {}) {
   const onPick = vi.fn(),
     onClose = vi.fn();
-  render(
+  const view = render(
     <EquipmentPicker
       api={api}
       initialCategory="package"
@@ -91,10 +101,146 @@ function renderPicker(api, props = {}) {
       {...props}
     />,
   );
-  return { onPick, onClose };
+  return { ...view, onPick, onClose };
 }
 
 describe("unified equipment picker", () => {
+  it.each([3200, null])(
+    "hydrates only the selected item before picking, preserving explicit detail cost %j",
+    async (purchase_cost) => {
+      const item = packageItem({ purchase_cost: null });
+      const other = packageItem({
+        item_id: "other",
+        name: "Another catalog package",
+        purchase_cost: null,
+      });
+      const pending = deferred();
+      const api = {
+        searchEquipmentSelector: vi
+          .fn()
+          .mockResolvedValue(equipmentResponse([item, other])),
+        getEquipment: vi.fn(() => pending.promise),
+      };
+      const { onPick } = renderPicker(api);
+      const button = await screen.findByRole("button", {
+        name: new RegExp(item.name),
+      });
+      expect(api.getEquipment).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      expect(api.getEquipment).toHaveBeenCalledExactlyOnceWith(item.item_id);
+      expect(screen.getByText("Loading item cost…")).toBeTruthy();
+      expect(onPick).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      expect(api.getEquipment).toHaveBeenCalledTimes(1);
+      const detail = {
+        ...item,
+        purchase_cost,
+        purchase_cost_source: purchase_cost === null ? null : "purchase_rate",
+      };
+      await act(async () => pending.resolve(detail));
+      await waitFor(() =>
+        expect(onPick).toHaveBeenCalledExactlyOnceWith(detail),
+      );
+      expect(api.getEquipment).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { item_id: "different" },
+    { selection_category: "ac" },
+    { rate: 4999 },
+  ])(
+    "rejects detail identity mismatch %j and can retry the selected item",
+    async (mismatch) => {
+      const item = packageItem();
+      const api = {
+        searchEquipmentSelector: vi
+          .fn()
+          .mockResolvedValue(equipmentResponse([item])),
+        getEquipment: vi
+          .fn()
+          .mockResolvedValueOnce({ ...item, ...mismatch })
+          .mockResolvedValueOnce(item),
+      };
+      const { onPick } = renderPicker(api);
+      fireEvent.click(
+        await screen.findByRole("button", { name: new RegExp(item.name) }),
+      );
+      const retry = await screen.findByRole("button", {
+        name: "Retry item details",
+      });
+      expect(screen.getByRole("alert")).toBeTruthy();
+      expect(onPick).not.toHaveBeenCalled();
+      fireEvent.click(retry);
+      await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(item));
+      expect(api.getEquipment.mock.calls).toEqual([
+        [item.item_id],
+        [item.item_id],
+      ]);
+    },
+  );
+
+  it("keeps detail request errors visible without selecting and retries one item detail request", async () => {
+    const item = packageItem();
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValue(equipmentResponse([item])),
+      getEquipment: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Item detail service unavailable"))
+        .mockResolvedValueOnce(item),
+    };
+    const { onPick } = renderPicker(api);
+    fireEvent.click(
+      await screen.findByRole("button", { name: new RegExp(item.name) }),
+    );
+    await screen.findByText("Item detail service unavailable");
+    expect(onPick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry item details" }));
+    await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(item));
+    expect(api.getEquipment).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["filter", "category", "unmount"])(
+    "discards late selected-item detail after %s invalidates the selection",
+    async (change) => {
+      const item = packageItem({ purchase_cost: null });
+      const pending = deferred();
+      const api = {
+        searchEquipmentSelector: vi
+          .fn()
+          .mockResolvedValue(equipmentResponse([item])),
+        getEquipment: vi.fn(() => pending.promise),
+      };
+      const { onPick, unmount } = renderPicker(api);
+      fireEvent.click(
+        await screen.findByRole("button", { name: new RegExp(item.name) }),
+      );
+      expect(api.getEquipment).toHaveBeenCalledExactlyOnceWith(item.item_id);
+      if (change === "filter")
+        fireEvent.change(
+          screen.getByRole("searchbox", { name: "Search equipment" }),
+          { target: { value: "changed" } },
+        );
+      else if (change === "category")
+        fireEvent.click(
+          screen.getByRole("button", { name: "AC", exact: true }),
+        );
+      else unmount();
+      if (change === "category")
+        await act(async () =>
+          pending.reject(new Error("Late item detail failure")),
+        );
+      else
+        await act(async () =>
+          pending.resolve({ ...item, purchase_cost: 3000 }),
+        );
+      expect(onPick).not.toHaveBeenCalled();
+      expect(screen.queryByText("Late item detail failure")).toBeNull();
+    },
+  );
+
   it("coalesces rapid typing until 200ms after the final change and cancels pending work on unmount", async () => {
     vi.useFakeTimers();
     const api = {
@@ -124,6 +270,7 @@ describe("unified equipment picker", () => {
       q: "furnace",
       btu: "",
       tons: "",
+      efficiency: "",
       page: 1,
       limit: 50,
     });
@@ -153,23 +300,26 @@ describe("unified equipment picker", () => {
     const wrongButton = await screen.findByRole("button", {
       name: /Unexpected AC result/,
     });
+    api.getEquipment = detailLookup(valid);
     expect(wrongButton.disabled).toBe(true);
     fireEvent.click(wrongButton);
     expect(onPick).not.toHaveBeenCalled();
+    expect(api.getEquipment).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole("button", { name: /Valid package result/ }),
     );
-    expect(onPick).toHaveBeenCalledExactlyOnceWith(valid);
+    await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(valid));
   });
 
   it("uses one category picker, preserves parent package capacities, and selects the returned item unchanged", async () => {
     const item = packageItem({
-      component_items: [{ tons: 2, btu_input: 80000 }],
+      afue: 99,
+      component_items: [{ tons: 2, btu_input: 80000, efficiency_percent: 80 }],
     });
     const api = {
       searchEquipmentSelector: vi.fn().mockResolvedValue(
         equipmentResponse([item], {
-          facets: { btus: [100000], tons: [1.5] },
+          facets: { btus: [100000], tons: [1.5], efficiencies: [95] },
         }),
       ),
     };
@@ -187,6 +337,7 @@ describe("unified equipment picker", () => {
       q: "",
       btu: "",
       tons: "",
+      efficiency: "",
       page: 1,
       limit: 50,
     });
@@ -201,10 +352,17 @@ describe("unified equipment picker", () => {
         .getAllByRole("option")
         .map((option) => option.value),
     ).toEqual(["", "100000"]);
+    expect(
+      within(screen.getByRole("combobox", { name: "Efficiency (%)" }))
+        .getAllByRole("option")
+        .map((option) => option.value),
+    ).toEqual(["", "95"]);
+    api.getEquipment = detailLookup(item);
     fireEvent.click(
       screen.getByRole("button", { name: new RegExp(item.name) }),
     );
-    expect(onPick).toHaveBeenCalledExactlyOnceWith(item);
+    await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(item));
+    expect(api.getEquipment).toHaveBeenCalledExactlyOnceWith(item.item_id);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
     await act(async () => {});
@@ -218,6 +376,7 @@ describe("unified equipment picker", () => {
         name: `Fixture package ${index}`,
         tons: 2,
         btu_input: 80000,
+        efficiency_percent: 85,
       }),
     );
     catalog[150] = packageItem({
@@ -228,13 +387,14 @@ describe("unified equipment picker", () => {
     });
     const api = {
       searchEquipmentSelector: vi.fn(
-        async ({ category, q, btu, tons, page, limit }) => {
+        async ({ category, q, btu, tons, efficiency, page, limit }) => {
           const matches = catalog.filter(
             (item) =>
               item.selection_category === category &&
               (!q || item.name.toLowerCase().includes(q.toLowerCase())) &&
               (!btu || item.btu_input === Number(btu)) &&
-              (!tons || item.tons === Number(tons)),
+              (!tons || item.tons === Number(tons)) &&
+              (!efficiency || item.efficiency_percent === Number(efficiency)),
           );
           return equipmentResponse(
             matches.slice((page - 1) * limit, page * limit),
@@ -263,21 +423,27 @@ describe("unified equipment picker", () => {
       target: { value: "1.5" },
     });
     await screen.findByText("Distant catalog match");
+    fireEvent.change(screen.getByRole("combobox", { name: "Efficiency (%)" }), {
+      target: { value: "95" },
+    });
+    await screen.findByText("Distant catalog match");
     expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
       category: "package",
       q: "Distant",
       btu: "100000",
       tons: "1.5",
+      efficiency: "95",
       page: 1,
       limit: 50,
     });
+    api.getEquipment = detailLookup(catalog[150]);
     fireEvent.click(
       screen.getByRole("button", { name: /Distant catalog match/ }),
     );
-    expect(onPick).toHaveBeenCalledWith(catalog[150]);
+    await waitFor(() => expect(onPick).toHaveBeenCalledWith(catalog[150]));
   });
 
-  it("pages server results, resets to page one after filtering, and clears both capacities on category change", async () => {
+  it("pages server results, resets to page one after filtering, and clears capacity/efficiency filters on category change", async () => {
     const api = {
       searchEquipmentSelector: vi.fn(async ({ category, q, btu, tons, page }) =>
         equipmentResponse(
@@ -316,15 +482,27 @@ describe("unified equipment picker", () => {
     await waitFor(() =>
       expect(api.searchEquipmentSelector.mock.lastCall[0].tons).toBe("1.5"),
     );
+    fireEvent.change(screen.getByRole("combobox", { name: "Efficiency (%)" }), {
+      target: { value: "95" },
+    });
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector.mock.lastCall[0].efficiency).toBe(
+        "95",
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "AC", exact: true }));
     await screen.findByText("ac page 1");
     expect(screen.getByRole("combobox", { name: "BTU" }).value).toBe("");
     expect(screen.getByRole("combobox", { name: "Tonnage" }).value).toBe("");
+    expect(screen.getByRole("combobox", { name: "Efficiency (%)" }).value).toBe(
+      "",
+    );
     expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
       category: "ac",
       q: "",
       btu: "",
       tons: "",
+      efficiency: "",
       page: 1,
       limit: 50,
     });
@@ -375,11 +553,12 @@ describe("unified equipment picker", () => {
     );
     expect(screen.queryByText("Late A package")).toBeNull();
     expect(screen.getByText(newer.name)).toBeTruthy();
+    api.getEquipment = detailLookup(newer);
     fireEvent.click(screen.getByRole("button", { name: /Current B package/ }));
-    expect(onPick).toHaveBeenCalledExactlyOnceWith(newer);
+    await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(newer));
   });
 
-  it.each(["BTU", "Tonnage", "category"])(
+  it.each(["BTU", "Tonnage", "Efficiency (%)", "category"])(
     "clears selectable results immediately when %s changes",
     async (control) => {
       const first = packageItem({ name: "Previously selectable package" });
@@ -400,7 +579,14 @@ describe("unified equipment picker", () => {
         );
       else
         fireEvent.change(screen.getByRole("combobox", { name: control }), {
-          target: { value: control === "BTU" ? "100000" : "1.5" },
+          target: {
+            value:
+              control === "BTU"
+                ? "100000"
+                : control === "Tonnage"
+                  ? "1.5"
+                  : "95",
+          },
         });
       expect(screen.queryByText(first.name)).toBeNull();
       fireEvent.click(oldButton);
@@ -445,11 +631,11 @@ describe("unified equipment picker", () => {
 
   it("shows an honest empty state and All-only filters when the category has no capacity ratings", async () => {
     const api = {
-      searchEquipmentSelector: vi
-        .fn()
-        .mockResolvedValue(
-          equipmentResponse([], { facets: { btus: [], tons: [] } }),
-        ),
+      searchEquipmentSelector: vi.fn().mockResolvedValue(
+        equipmentResponse([], {
+          facets: { btus: [], tons: [], efficiencies: [] },
+        }),
+      ),
     };
     renderPicker(api, { initialCategory: "coil" });
     await screen.findByText(/No .*match/i);
@@ -460,13 +646,41 @@ describe("unified equipment picker", () => {
     ).toBe("true");
     expect(screen.getByText("No BTU ratings available")).toBeTruthy();
     expect(screen.getByText("No tonnage ratings available")).toBeTruthy();
-    for (const name of ["BTU", "Tonnage"])
+    for (const name of ["BTU", "Tonnage", "Efficiency (%)"])
       expect(
         within(screen.getByRole("combobox", { name }))
           .getAllByRole("option")
           .map((option) => option.value),
       ).toEqual([""]);
     expect(screen.queryByRole("button", { name: /Unnamed part/ })).toBeNull();
+  });
+
+  it("does not invent efficiency options from sales item names, SEER, AFUE or component ratings", async () => {
+    const item = packageItem({
+      name: "Unrated package advertised as 96 percent",
+      efficiency_percent: null,
+      seer: 18,
+      afue: 96,
+      component_items: [{ efficiency_percent: 95 }],
+    });
+    const api = {
+      searchEquipmentSelector: vi.fn().mockResolvedValue(
+        equipmentResponse([item], {
+          facets: { btus: [100000], tons: [1.5], efficiencies: [] },
+        }),
+      ),
+    };
+    renderPicker(api);
+    await screen.findByText(item.name);
+    const efficiency = screen.getByRole("combobox", { name: "Efficiency (%)" });
+    expect(
+      within(efficiency)
+        .getAllByRole("option")
+        .map((option) => option.value),
+    ).toEqual([""]);
+    expect(
+      within(efficiency).getByRole("option", { name: "All efficiencies" }),
+    ).toBeTruthy();
   });
 });
 
@@ -535,7 +749,9 @@ describe("system slots and item edits", () => {
       const pick = await within(dialog).findByRole("button", {
         name: new RegExp(returned.name),
       });
+      api.getEquipment = detailLookup(returned);
       fireEvent.click(pick);
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       const equipment = onChange.mock.lastCall[0][0].equipment;
       expect(equipment.package.description).toBe(description);
       expect(equipment.package.notes).toBe("Keep project-specific notes");
@@ -593,12 +809,15 @@ describe("system slots and item edits", () => {
       q: "",
       btu: "",
       tons: "",
+      efficiency: "",
       page: 1,
       limit: 50,
     });
+    api.getEquipment = detailLookup(replacement);
     fireEvent.click(
       screen.getByRole("button", { name: /Replacement furnace/ }),
     );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(onChange.mock.lastCall[0][0].equipment.furnace.item_id).toBe(
       "new-furnace",
     );
@@ -647,13 +866,16 @@ describe("system slots and item edits", () => {
         q: "",
         btu: "",
         tons: "",
+        efficiency: "",
         page: 1,
         limit: 50,
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Coil", exact: true }));
     await screen.findByText(coil.name);
+    api.getEquipment = detailLookup(coil);
     fireEvent.click(screen.getByRole("button", { name: /Fixture Coil/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(
       screen.getByRole("textbox", { name: "Edit Coil estimate description" })
         .value,
@@ -706,9 +928,11 @@ describe("system slots and item edits", () => {
       screen.getByRole("button", { name: "Select equipment", exact: true }),
     );
     await screen.findByText(selectedPackage.name);
+    api.getEquipment = detailLookup(selectedPackage);
     fireEvent.click(
       screen.getByRole("button", { name: new RegExp(selectedPackage.name) }),
     );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const updated = onChange.mock.lastCall[0];
     expect(Object.keys(updated[0].equipment).sort()).toEqual([
       "package",
@@ -779,9 +1003,11 @@ describe("system slots and item edits", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: label, exact: true }));
       await screen.findByText(selected.name);
+      api.getEquipment = detailLookup(selected);
       fireEvent.click(
         screen.getByRole("button", { name: new RegExp(selected.name) }),
       );
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       const updated = onChange.mock.lastCall[0][0].equipment;
       expect(updated).not.toHaveProperty("package");
       expect(updated[slot]).toEqual({
@@ -903,11 +1129,20 @@ describe("system slots and item edits", () => {
   });
 });
 
-function PricingHarness({ onPricingChange, onOptionsChange }) {
+function PricingHarness({
+  onPricingChange,
+  onOptionsChange,
+  initialPricing = {},
+  missingCostCount = 0,
+}) {
   const [pricing, setPricing] = React.useState({
     subtotal: 100,
+    equipment_cost: 60,
+    equipment_cost_manual: false,
     total: 150,
+    total_manual: true,
     deposit_percent: 35,
+    ...initialPricing,
   });
   const [options, setOptions] = React.useState({
     rebates: [
@@ -919,9 +1154,16 @@ function PricingHarness({ onPricingChange, onOptionsChange }) {
     <PricingStep
       pricing={pricing}
       options={options}
+      missingCostCount={missingCostCount}
       onPricingChange={(changes) => {
         onPricingChange(changes);
-        setPricing((current) => ({ ...current, ...changes }));
+        setPricing(
+          (current) =>
+            draftReducer(
+              { pricing: current },
+              { type: "setPricing", pricing: changes },
+            ).pricing,
+        );
       }}
       onOptionsChange={(changes) => {
         onOptionsChange(changes);
@@ -932,7 +1174,38 @@ function PricingHarness({ onPricingChange, onOptionsChange }) {
 }
 
 describe("manual pricing", () => {
-  it("keeps project total independent until Use subtotal is pressed", () => {
+  it("keeps unknown purchase cost blank, warns honestly and accepts an explicit zero manual cost without changing sales price", () => {
+    const onPricingChange = vi.fn();
+    render(
+      <PricingHarness
+        onPricingChange={onPricingChange}
+        onOptionsChange={vi.fn()}
+        initialPricing={{ equipment_cost: null }}
+        missingCostCount={2}
+      />,
+    );
+    const cost = screen.getByRole("spinbutton", {
+      name: /^Equipment subtotal \(cost\)/,
+    });
+    const total = screen.getByRole("spinbutton", { name: /^Project total/ });
+    expect(cost.value).toBe("");
+    expect(total.value).toBe("150");
+    expect(screen.getByRole("status").textContent).toMatch(
+      /Purchase cost is missing for 2 selected items.*Enter the equipment cost manually\./,
+    );
+    expect(screen.getByRole("status").textContent).not.toContain(
+      "manual override",
+    );
+    fireEvent.change(cost, { target: { value: "0" } });
+    expect(onPricingChange).toHaveBeenLastCalledWith({ equipment_cost: 0 });
+    expect(cost.value).toBe("0");
+    expect(total.value).toBe("150");
+    expect(screen.getByRole("status").textContent).toContain(
+      "The amount above is a manual override.",
+    );
+  });
+
+  it("keeps equipment cost independent and explicitly restores equipment sales pricing", () => {
     const onPricingChange = vi.fn();
     render(
       <PricingHarness
@@ -944,14 +1217,21 @@ describe("manual pricing", () => {
       name: /^Equipment subtotal/,
     });
     const total = screen.getByRole("spinbutton", {
-      name: /Total project cost/,
+      name: /^Project total/,
     });
     fireEvent.change(subtotal, { target: { value: "175.25" } });
-    expect(onPricingChange).toHaveBeenLastCalledWith({ subtotal: 175.25 });
+    expect(onPricingChange).toHaveBeenLastCalledWith({
+      equipment_cost: 175.25,
+    });
     expect(total.value).toBe("150");
-    fireEvent.click(screen.getByRole("button", { name: "Use subtotal" }));
-    expect(onPricingChange).toHaveBeenLastCalledWith({ total: 175.25 });
-    expect(total.value).toBe("175.25");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use equipment sales price" }),
+    );
+    expect(onPricingChange).toHaveBeenLastCalledWith({
+      total: 100,
+      total_manual: false,
+    });
+    expect(total.value).toBe("100");
   });
 
   it("updates and removes only the targeted rebate without deducting it from project total", () => {
@@ -979,7 +1259,7 @@ describe("manual pricing", () => {
       rebates: [{ name: "Second rebate", amount: 30 }],
     });
     expect(
-      screen.getByRole("spinbutton", { name: /Total project cost/ }).value,
+      screen.getByRole("spinbutton", { name: /^Project total/ }).value,
     ).toBe("150");
     expect(onPricingChange).not.toHaveBeenCalled();
   });

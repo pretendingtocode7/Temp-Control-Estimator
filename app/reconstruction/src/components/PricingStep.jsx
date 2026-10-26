@@ -1,11 +1,12 @@
 /** Reconstructed from the saved v0.4.8 deployment bundle; not recovered original source. */
 export function PricingStep({
   pricing,
+  missingCostCount = 0,
   options,
   onPricingChange,
   onOptionsChange,
 }) {
-  const equipmentSubtotal = pricing.subtotal || 0,
+  const equipmentSalesSubtotal = pricing.subtotal || 0,
     updateRebate = (rebateIndex, changes) => {
       const rebates = (options.rebates || []).map((rebate, currentIndex) =>
         currentIndex === rebateIndex
@@ -45,39 +46,55 @@ export function PricingStep({
       <h2 className="tc-step-title">{"Pricing and options"}</h2>
       <p className="tc-step-help">
         {
-          "Sales rates from eligible Zoho Books items seed the subtotal. Override subtotal and total as needed for labor, permits, discounts, and package pricing."
+          "Equipment subtotal is your purchase cost. Project total is the sales price charged to the customer. You can edit either amount."
         }
       </p>
       <div className="tc-field-grid">
         <label className="tc-field">
-          <span className="tc-field-label">{"Equipment subtotal"}</span>
+          <span className="tc-field-label">Equipment subtotal (cost)</span>
           <input
             type="number"
             inputMode="decimal"
             className="tc-input"
+            aria-label="Equipment subtotal (cost)"
             min="0"
             step="0.01"
-            value={pricing.subtotal || ""}
+            value={pricing.equipment_cost ?? ""}
             onChange={(event) =>
               onPricingChange({
-                subtotal: parseFloat(event.target.value) || 0,
+                equipment_cost:
+                  event.target.value === ""
+                    ? null
+                    : parseFloat(event.target.value),
               })
             }
-            placeholder="0.00"
+            placeholder={missingCostCount > 0 ? "Unknown cost" : "0.00"}
           />
           <span className="tc-field-note">
-            {"Auto-filled from selected CRM Sales Price, editable."}
+            {pricing.equipment_cost_manual
+              ? "Manual equipment cost; retained when equipment changes."
+              : "Auto-filled only from known purchase costs."}
           </span>
+          {missingCostCount > 0 && (
+            <span className="tc-cost-warning tc-field-help" role="status">
+              Purchase cost is missing for {missingCostCount} selected{" "}
+              {missingCostCount === 1 ? "item" : "items"}.{" "}
+              {pricing.equipment_cost_manual && pricing.equipment_cost !== null
+                ? "The amount above is a manual override."
+                : "Enter the equipment cost manually."}
+            </span>
+          )}
         </label>
         <label className="tc-field">
-          <span className="tc-field-label">{"Total project cost"}</span>
+          <span className="tc-field-label">Project total</span>
           <input
             type="number"
             inputMode="decimal"
             className="tc-input"
+            aria-label="Project total"
             min="0"
             step="0.01"
-            value={pricing.total || ""}
+            value={pricing.total ?? ""}
             onChange={(event) =>
               onPricingChange({
                 total: parseFloat(event.target.value) || 0,
@@ -90,12 +107,18 @@ export function PricingStep({
             className="tc-btn tc-btn-ghost tc-btn-sm"
             onClick={() =>
               onPricingChange({
-                total: equipmentSubtotal,
+                total: equipmentSalesSubtotal,
+                total_manual: false,
               })
             }
           >
-            {"Use subtotal"}
+            Use equipment sales price
           </button>
+          <span className="tc-field-note">
+            {pricing.total_manual
+              ? "Manual sales price; equipment and rebate changes will not replace it."
+              : "Starts from selected equipment sales prices. Add labor, discounts or other charges as needed."}
+          </span>
         </label>
         <label className="tc-field">
           <span className="tc-field-label">{"Deposit (%)"}</span>

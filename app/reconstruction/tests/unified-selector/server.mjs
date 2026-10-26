@@ -44,6 +44,18 @@ const server = http.createServer((request, response) => {
     response.writeHead(204);
     return response.end();
   }
+  if (
+    ["/estimate-builder/assets/logo.jpg", "/assets/logo.jpg"].includes(
+      url.pathname,
+    )
+  ) {
+    const logo = path.resolve(app, "../../assets/logo.jpg");
+    response.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "no-store",
+    });
+    return fs.createReadStream(logo).pipe(response);
+  }
   response.writeHead(404, { "Content-Type": "text/plain" });
   response.end("No local fixture for this path; no external proxy exists.");
 });

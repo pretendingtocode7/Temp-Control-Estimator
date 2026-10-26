@@ -26,14 +26,19 @@ from datetime import datetime, timezone
 ORIGINAL_SHA = '0c1c04ef023b6aa094b2237e1f62452bed8f08d37ed4308e2d9aa0732937f56b'
 EXPECTED_LOCK_SHA = '95086183b87a15a142ea7423540c286ced2ac2711b2d7c9d1e0e1d6184ae642d'
 OLD_VERSION = '0.4.8'
-NEW_VERSION = '0.4.11'
-EXPECTED_TEST_COUNT = 124
+NEW_VERSION = '0.4.12'
+EXPECTED_TEST_COUNT = 144
 SLUG = 'temp-control-estimate-builder'
 ASSETS = ('estimate-builder.js', 'estimate-builder.css', 'service-worker.js', 'estimate-builder.js.map')
 RUNTIME_OVERRIDES = (
     ('app/reconstruction/runtime/public/class-enqueue.php', 'public/class-enqueue.php'),
     ('app/reconstruction/runtime/includes/class-equipment-catalog.php', 'includes/class-equipment-catalog.php'),
     ('app/reconstruction/runtime/admin/class-settings-page.php', 'admin/class-settings-page.php'),
+    ('app/reconstruction/runtime/endpoints/class-search-equipment.php', 'endpoints/class-search-equipment.php'),
+    ('app/reconstruction/runtime/endpoints/class-preview-estimate.php', 'endpoints/class-preview-estimate.php'),
+    ('app/reconstruction/runtime/endpoints/class-generate-estimate.php', 'endpoints/class-generate-estimate.php'),
+    ('app/reconstruction/runtime/includes/class-token-renderer.php', 'includes/class-token-renderer.php'),
+    ('app/reconstruction/runtime/includes/class-estimate-generator.php', 'includes/class-estimate-generator.php'),
 )
 PACKAGING_TOOL_PATH = 'app/reconstruction/tools/prepare-release.py'
 

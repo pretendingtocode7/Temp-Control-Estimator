@@ -169,6 +169,33 @@ describe("reference-compatible draft model", () => {
     expect(JSON.stringify(payload)).not.toContain("fixture@example.test");
     expect(buildPayload(draft, false)).not.toHaveProperty("books_edits");
   });
+  it("keeps a selected package as one priced item and sends its canonical slot without hydrated component data", () => {
+    const draft = fixture();
+    draft.systems[0].equipment = {
+      package: {
+        item_id: "2273343000000787099",
+        selection_category: "package",
+        is_composite: true,
+        tons: 1.5,
+        btu_input: 100000,
+        rate: 6200,
+        description: "Edited complete package scope",
+        component_items: [{ item_id: "child", tons: 2, rate: 900 }],
+      },
+      permit: { item_id: "permit", description: "Municipal permit", rate: 125 },
+    };
+    expect(sumEquipment(draft.systems)).toBe(6325);
+    expect(buildPayload(draft).systems[0].equipment).toEqual({
+      package: {
+        item_id: "2273343000000787099",
+        description: "Edited complete package scope",
+      },
+      permit: { item_id: "permit", description: "Municipal permit", rate: 125 },
+    });
+    expect(JSON.stringify(buildPayload(draft))).not.toContain(
+      "component_items",
+    );
+  });
 });
 
 describe("pricing, catalog search and identity utilities", () => {

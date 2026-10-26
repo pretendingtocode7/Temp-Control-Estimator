@@ -24,14 +24,17 @@ final class Equipment_Catalog {
 
 	private const MAX_PAGES = 50;
 	private const PER_PAGE  = 200;
-	private const CACHE_POLICY = 'package_tag_v1';
+	private const CACHE_POLICY = 'package_tag_v2';
 	private const LIST_CACHE_TTL = 900;
+	private const SELECTOR_TYPES = array(
+		'package' => 'package', 'ac' => 'condenser', 'furnace' => 'furnace', 'coil' => 'evaporator_coil',
+	);
 
 	/** Resolved from Books once per organization during this PHP request. */
 	private array $package_selections = array();
 
 	public const TYPES = array(
-		'furnace', 'condenser', 'evaporator_coil', 'air_handler', 'thermostat',
+		'package', 'furnace', 'condenser', 'evaporator_coil', 'air_handler', 'thermostat',
 		'humidifier', 'uv_purifier', 'water_heater', 'filter', 'part', 'permit', 'other',
 	);
 
@@ -66,26 +69,14 @@ final class Equipment_Catalog {
 
 		$matches = array();
 		foreach ( $items as $entry ) {
-			if ( '' !== $type && '' !== $entry['equipment_type'] && in_array( $entry['equipment_type'], self::TYPES, true ) && $entry['equipment_type'] !== $type ) {
+			if ( '' !== $type && $entry['equipment_type'] !== $type ) {
 				continue;
-			}
-			if ( '' !== $type && ( '' === $entry['equipment_type'] || ! in_array( $entry['equipment_type'], self::TYPES, true ) ) ) {
-				$entry['equipment_type'] = $type;
 			}
 			if ( '' !== $brand && 0 !== strcasecmp( $entry['brand'], $brand ) ) {
 				continue;
 			}
-			if ( '' !== $q ) {
-				$haystack = implode( ' ', array(
-					$entry['name'],
-					$entry['sku'],
-					$entry['brand'],
-					$entry['model'],
-					$entry['short_description'],
-				) );
-				if ( false === stripos( $haystack, $q ) ) {
-					continue;
-				}
+			if ( ! $this->matches_text( $entry, $q ) ) {
+				continue;
 			}
 			$matches[] = $entry;
 			if ( count( $matches ) >= $limit ) {
@@ -94,6 +85,160 @@ final class Equipment_Catalog {
 		}
 
 		return $matches;
+	}
+
+	/** Filter the complete eligible catalog before slicing a selector page. */
+	public function search_selector( array $args = array() ): array|WP_Error {
+		$category = $args['category'] ?? 'package';
+		if ( ! is_string( $category ) || ! isset( self::SELECTOR_TYPES[ $category ] ) ) {
+			return $this->invalid_selector_filter();
+		}
+		foreach ( array( 'q', 'brand' ) as $field ) {
+			if ( isset( $args[ $field ] ) && ! is_string( $args[ $field ] ) ) {
+				return $this->invalid_selector_filter();
+			}
+		}
+		$q = sanitize_text_field( $args['q'] ?? '' );
+		$brand = sanitize_text_field( $args['brand'] ?? '' );
+		$page = $this->positive_integer_argument( $args['page'] ?? 1 );
+		$limit = $this->positive_integer_argument( $args['limit'] ?? 50 );
+		if ( null === $page || null === $limit ) {
+			return $this->invalid_selector_filter();
+		}
+		$limit = min( 100, $limit );
+		$filters = array();
+		foreach ( array( 'btu' => 'btu', 'tons' => 'tons' ) as $key => $kind ) {
+			$value = $args[ $key ] ?? null;
+			$filters[ $key ] = null;
+			if ( null !== $value && '' !== $value ) {
+				$filters[ $key ] = $this->parse_rating( $value, $kind );
+				if ( null === $filters[ $key ] ) {
+					return $this->invalid_selector_filter();
+				}
+			}
+		}
+		$items = $this->eligible_items();
+		if ( is_wp_error( $items ) ) {
+			return $items;
+		}
+		$matches = array();
+		$btus = array();
+		$tons = array();
+		foreach ( $items as $entry ) {
+			if ( $entry['selection_category'] !== $category ) {
+				continue;
+			}
+			if ( null !== $entry['btu_input'] ) {
+				$btus[] = $entry['btu_input'];
+			}
+			if ( null !== $entry['tons'] ) {
+				$tons[] = $entry['tons'];
+			}
+			if ( ( '' !== $brand && 0 !== strcasecmp( $entry['brand'], $brand ) ) ||
+				! $this->matches_text( $entry, $q ) ||
+				( null !== $filters['btu'] && $entry['btu_input'] !== $filters['btu'] ) ||
+				( null !== $filters['tons'] && ( null === $entry['tons'] || (float) $entry['tons'] !== $filters['tons'] ) ) ) {
+				continue;
+			}
+			$matches[] = $entry;
+		}
+		$btus = array_values( array_unique( $btus, SORT_NUMERIC ) );
+		$tons = array_values( array_unique( $tons, SORT_NUMERIC ) );
+		sort( $btus, SORT_NUMERIC );
+		sort( $tons, SORT_NUMERIC );
+		$total = count( $matches );
+		// Avoid overflowing an offset for an otherwise valid, very distant page.
+		$offset = $page > intdiv( PHP_INT_MAX, $limit ) ? $total : ( $page - 1 ) * $limit;
+		return array(
+			'items' => array_slice( $matches, $offset, $limit ),
+			'total' => $total,
+			'page' => $page,
+			'per_page' => $limit,
+			'has_more' => $offset < $total && $limit < $total - $offset,
+			'facets' => array( 'btus' => $btus, 'tons' => $tons ),
+		);
+	}
+
+	/**
+	 * Validate freshly hydrated items, never client-supplied category/rate metadata.
+	 * @return true|WP_Error
+	 */
+	public function validate_selection( array $systems, array $catalog_by_id ): bool|WP_Error {
+		if ( ! array_is_list( $systems ) ) {
+			return $this->invalid_selection();
+		}
+		$core_slots = array( 'package' => 'package', 'condenser' => 'ac', 'furnace' => 'furnace', 'coil' => 'coil' );
+		$accessory_slots = array_diff( self::TYPES, array( 'package', 'condenser', 'furnace', 'evaporator_coil' ) );
+		$system_numbers = array();
+		foreach ( $systems as $index => $system ) {
+			if ( ! is_array( $system ) || ! isset( $system['equipment'] ) || ! is_array( $system['equipment'] ) ) {
+				return $this->invalid_selection();
+			}
+			$number = $this->positive_integer_argument( array_key_exists( 'system_number', $system ) ? $system['system_number'] : $index + 1 );
+			if ( null === $number || isset( $system_numbers[ $number ] ) ) {
+				return $this->invalid_selection();
+			}
+			$system_numbers[ $number ] = true;
+			$seen = array();
+			$has_package = false;
+			$has_component = false;
+			foreach ( $system['equipment'] as $slot => $selection ) {
+				if ( ! is_string( $slot ) || ! is_array( $selection ) || ! $this->valid_item_id( $selection['item_id'] ?? null ) ) {
+					return $this->invalid_selection();
+				}
+				$id = $selection['item_id'];
+				$item = $catalog_by_id[ $id ] ?? null;
+				if ( isset( $seen[ $id ] ) || ! is_array( $item ) || ( $item['item_id'] ?? null ) !== $id ||
+					true !== ( $item['for_estimate'] ?? null ) || true !== ( $item['package_tagged'] ?? null ) ||
+					! is_bool( $item['is_composite'] ?? null ) ) {
+					return $this->invalid_selection();
+				}
+				$seen[ $id ] = true;
+				if ( isset( $core_slots[ $slot ] ) ) {
+					$category = $core_slots[ $slot ];
+					if ( ( $item['selection_category'] ?? null ) !== $category ||
+						( $item['equipment_type'] ?? null ) !== self::SELECTOR_TYPES[ $category ] ||
+						$item['is_composite'] !== ( 'package' === $category ) ) {
+						return $this->invalid_selection();
+					}
+					$has_package = $has_package || 'package' === $slot;
+					$has_component = $has_component || 'package' !== $slot;
+				} elseif ( ! in_array( $slot, $accessory_slots, true ) ||
+					( $item['equipment_type'] ?? null ) !== $slot ||
+					'' !== ( $item['selection_category'] ?? null ) || $item['is_composite'] ) {
+					return $this->invalid_selection();
+				}
+			}
+			if ( $has_package && $has_component ) {
+				return $this->invalid_selection();
+			}
+		}
+		return true;
+	}
+
+	private function matches_text( array $entry, string $query ): bool {
+		$haystack = array();
+		foreach ( array( 'name', 'sku', 'brand', 'model', 'short_description', 'js_part_number', 'mfg_part_number' ) as $field ) {
+			$haystack[] = $entry[ $field ] ?? '';
+		}
+		return '' === trim( $query ) || false !== stripos( implode( ' ', $haystack ), trim( $query ) );
+	}
+
+	private function positive_integer_argument( mixed $value ): ?int {
+		if ( is_string( $value ) && 1 === preg_match( '/^[1-9][0-9]*$/D', $value ) &&
+			strlen( $value ) <= strlen( (string) PHP_INT_MAX ) &&
+			( strlen( $value ) < strlen( (string) PHP_INT_MAX ) || strcmp( $value, (string) PHP_INT_MAX ) <= 0 ) ) {
+			$value = (int) $value;
+		}
+		return is_int( $value ) && $value >= 1 ? $value : null;
+	}
+
+	private function invalid_selector_filter(): WP_Error {
+		return new WP_Error( 'tc_estimate_bad_equipment_filter', __( 'Invalid equipment filter.', 'tc-estimate' ), array( 'status' => 400 ) );
+	}
+
+	private function invalid_selection(): WP_Error {
+		return new WP_Error( 'tc_estimate_bad_equipment_selection', __( 'Select a package or matching individual equipment without duplicate or conflicting items.', 'tc-estimate' ), array( 'status' => 400 ) );
 	}
 
 	/**
@@ -291,13 +436,28 @@ final class Equipment_Catalog {
 				! preg_match( '/^[0-9]{10,20}$/', $item['item_id'] ) ) {
 				return false;
 			}
-			foreach ( array( 'name', 'sku', 'brand', 'model', 'equipment_type', 'short_description' ) as $field ) {
+			foreach ( array( 'name', 'sku', 'brand', 'model', 'equipment_type', 'selection_category', 'short_description', 'js_part_number', 'mfg_part_number' ) as $field ) {
 				if ( ! isset( $item[ $field ] ) || ! is_string( $item[ $field ] ) ) {
 					return false;
 				}
 			}
 			if ( ! isset( $item['rate'] ) || ( ! is_int( $item['rate'] ) && ! is_float( $item['rate'] ) ) ) {
 				return false;
+			}
+			$category = $item['selection_category'];
+			if ( ! is_bool( $item['is_composite'] ?? null ) ||
+				( '' !== $category && ( ! isset( self::SELECTOR_TYPES[ $category ] ) || self::SELECTOR_TYPES[ $category ] !== $item['equipment_type'] ) ) ||
+				$item['is_composite'] !== ( 'package' === $category ) ||
+				( '' === $category && in_array( $item['equipment_type'], self::SELECTOR_TYPES, true ) ) ) {
+				return false;
+			}
+			foreach ( array( 'btu_input', 'btu_output', 'tons' ) as $field ) {
+				if ( ! array_key_exists( $field, $item ) ||
+					( null !== $item[ $field ] &&
+						( ( 'tons' === $field ? ( ! is_float( $item[ $field ] ) && ! is_int( $item[ $field ] ) ) : ! is_int( $item[ $field ] ) ) ||
+						! is_finite( (float) $item[ $field ] ) || $item[ $field ] <= 0 ) ) ) {
+					return false;
+				}
 			}
 		}
 		return true;
@@ -356,6 +516,11 @@ final class Equipment_Catalog {
 		$brand = (string) $this->first_value( $item, $cf, array( 'cf_brand', 'brand', 'Brand', 'manufacturer', 'Manufacturer' ), '' );
 		$model = (string) $this->first_value( $item, $cf, array( 'cf_model', 'model', 'Model', 'Mfg_Part_Number', 'JS_Part_Number', 'sku', 'SKU' ), '' );
 		$type  = $this->normalize_type( (string) $this->first_value( $item, $cf, array( 'cf_equipment_type', 'equipment_type', 'Equipment_Type', 'Type' ), '' ) );
+		$classification = $this->classify_item( $item, $type, $name );
+		$tons = $this->item_rating( $item, array( 'cf_tons', 'tons' ), 'tons', $name );
+		$btu_input = $this->item_rating( $item, array( 'cf_btu_input', 'btu_input' ), 'btu', $name );
+		// An unlabeled name BTU value is never evidence of output capacity.
+		$btu_output = $this->item_rating( $item, array( 'cf_btu_output', 'btu_output' ), 'btu', '' );
 		$desc  = (string) $this->first_value( $item, $cf, array( 'description', 'Description', 'cf_short_description', 'short_description', 'Short_Description' ), '' );
 
 		return array(
@@ -364,14 +529,16 @@ final class Equipment_Catalog {
 			'sku'                    => $sku,
 			'rate'                   => (float) $this->first_value( $item, $cf, array( 'rate', 'Rate', 'sales_rate', 'Sales_Price' ), 0 ),
 			'stock_on_hand'          => (float) $this->first_value( $item, $cf, array( 'stock_on_hand', 'available_stock', 'Qty_in_Stock' ), 0 ),
-			'equipment_type'         => $type,
+			'equipment_type'         => $classification['equipment_type'],
+			'selection_category'     => $classification['selection_category'],
+			'is_composite'           => $classification['is_composite'],
 			'brand'                  => $brand,
 			'model'                  => $model,
 			'afue'                   => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_afue', 'afue', 'AFUE', 'AFUE_Percent' ), null ) ),
 			'seer'                   => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_seer', 'seer', 'SEER', 'SEER_Rating' ), null ) ),
-			'tons'                   => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_tons', 'tons', 'Tons' ), null ) ),
-			'btu_input'              => $this->nullable_int( $this->first_value( $item, $cf, array( 'cf_btu_input', 'btu_input', 'BTU_Input' ), null ) ),
-			'btu_output'             => $this->nullable_int( $this->first_value( $item, $cf, array( 'cf_btu_output', 'btu_output', 'BTU_Output' ), null ) ),
+			'tons'                   => $tons,
+			'btu_input'              => $btu_input,
+			'btu_output'             => $btu_output,
 			'stages'                 => (string) $this->first_value( $item, $cf, array( 'cf_stages', 'stages', 'Stages' ), '' ),
 			'refrigerant'            => (string) $this->first_value( $item, $cf, array( 'cf_refrigerant', 'refrigerant', 'Refrigerant' ), '' ),
 			'width_inches'           => $this->nullable_float( $this->first_value( $item, $cf, array( 'cf_width', 'width_inches', 'Width' ), null ) ),
@@ -392,7 +559,7 @@ final class Equipment_Catalog {
 	}
 
 	/**
-	 * Pull custom fields from inline cf_* keys and from the custom_fields array.
+	 * Pull custom fields from inline cf_* keys, the hash, and custom_fields array.
 	 *
 	 * @return array<string,mixed>
 	 */
@@ -405,6 +572,19 @@ final class Equipment_Catalog {
 			$map[ $key ]                    = $value;
 			$map[ strtolower( $key ) ]       = $value;
 			$map[ substr( strtolower( $key ), 3 ) ] = $value;
+		}
+		if ( isset( $item['custom_field_hash'] ) && is_array( $item['custom_field_hash'] ) ) {
+			foreach ( $item['custom_field_hash'] as $name => $value ) {
+				if ( ! is_string( $name ) ) {
+					continue;
+				}
+				$key = $this->field_key( $name );
+				$map[ $name ] = $value;
+				$map[ $key ] = $value;
+				if ( str_starts_with( $key, 'cf_' ) ) {
+					$map[ substr( $key, 3 ) ] = $value;
+				}
+			}
 		}
 
 		if ( isset( $item['custom_fields'] ) && is_array( $item['custom_fields'] ) ) {
@@ -442,6 +622,134 @@ final class Equipment_Catalog {
 			}
 		}
 		return $default;
+	}
+
+	/** The raw composite boolean establishes package identity, never eligibility. */
+	private function classify_item( array $item, string $type, string $name ): array {
+		$unknown = array( 'equipment_type' => '', 'selection_category' => '', 'is_composite' => false );
+		if ( ! is_bool( $item['is_combo_product'] ?? null ) ) {
+			return $unknown;
+		}
+		if ( $item['is_combo_product'] ) {
+			return array( 'equipment_type' => 'package', 'selection_category' => 'package', 'is_composite' => true );
+		}
+		if ( in_array( $type, self::TYPES, true ) ) {
+			if ( 'package' === $type ) {
+				return $unknown;
+			}
+			$category = array_search( $type, self::SELECTOR_TYPES, true );
+			return array( 'equipment_type' => $type, 'selection_category' => false === $category ? '' : $category, 'is_composite' => false );
+		}
+		$categories = array();
+		$descriptors = array(
+			'ac' => '/\b(?:a\s*\/\s*c|ac|air\s+condition(?:er|ing)|condenser)\b/i',
+			'furnace' => '/\bfurnaces?\b/i',
+			'coil' => '/\b(?:evaporator\s+coil|evap\.?\s+coil|coil)\b/i',
+		);
+		foreach ( $descriptors as $category => $pattern ) {
+			if ( 1 === preg_match( $pattern, $name ) ) {
+				$categories[] = $category;
+			}
+		}
+		if ( 1 !== count( $categories ) ) {
+			return $unknown;
+		}
+		$category = $categories[0];
+		return array( 'equipment_type' => self::SELECTOR_TYPES[ $category ], 'selection_category' => $category, 'is_composite' => false );
+	}
+
+	private function field_key( string $name ): string {
+		return strtolower( (string) preg_replace( '/[^a-zA-Z0-9]+/', '_', trim( $name ) ) );
+	}
+
+	/** Invalid/conflicting structured values suppress the explicit-name fallback. */
+	private function item_rating( array $item, array $keys, string $kind, string $name ): int|float|null {
+		$values = array();
+		foreach ( $item as $key => $value ) {
+			if ( is_string( $key ) && in_array( $this->field_key( $key ), $keys, true ) ) {
+				$values[] = $value;
+			}
+		}
+		if ( isset( $item['custom_field_hash'] ) && is_array( $item['custom_field_hash'] ) ) {
+			foreach ( $item['custom_field_hash'] as $key => $value ) {
+				if ( is_string( $key ) && in_array( $this->field_key( $key ), $keys, true ) ) {
+					$values[] = $value;
+				}
+			}
+		}
+		if ( isset( $item['custom_fields'] ) && is_array( $item['custom_fields'] ) ) {
+			foreach ( $item['custom_fields'] as $field ) {
+				if ( ! is_array( $field ) ) {
+					continue;
+				}
+				$key = $field['api_name'] ?? $field['placeholder'] ?? $field['label'] ?? '';
+				if ( is_string( $key ) && in_array( $this->field_key( $key ), $keys, true ) ) {
+					$values[] = $field['value'] ?? null;
+				}
+			}
+		}
+		$rating = null;
+		$present = false;
+		foreach ( $values as $value ) {
+			if ( null === $value || ( is_string( $value ) && '' === trim( $value ) ) ) {
+				continue;
+			}
+			$present = true;
+			$parsed = $this->parse_rating( $value, $kind );
+			if ( null === $parsed || ( null !== $rating && $rating !== $parsed ) ) {
+				return null;
+			}
+			$rating = $parsed;
+		}
+		return $present ? $rating : $this->name_rating( $name, $kind );
+	}
+
+	/** Complete tokens only: no parseInt/float prefix coercion or model decoding. */
+	private function parse_rating( mixed $value, string $kind ): int|float|null {
+		if ( is_int( $value ) || is_float( $value ) ) {
+			$number = (float) $value;
+		} elseif ( is_string( $value ) ) {
+			$numeric = '(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?|\.[0-9]+';
+			$pattern = 'tons' === $kind
+				? '/^(' . $numeric . ')\s*(?:-?\s*tons?)?$/iD'
+				: '/^(' . $numeric . ')\s*(k)?\s*(?:-?\s*btu(?:\s*\/\s*h(?:r|our)?)?)?$/iD';
+			if ( 1 !== preg_match( $pattern, trim( $value ), $match ) ) {
+				return null;
+			}
+			$number = (float) str_replace( ',', '', $match[1] );
+			if ( 'btu' === $kind && ! empty( $match[2] ) ) {
+				$number *= 1000;
+			}
+		} else {
+			return null;
+		}
+		if ( ! is_finite( $number ) || $number <= 0 ) {
+			return null;
+		}
+		if ( 'btu' === $kind ) {
+			return $number < PHP_INT_MAX && floor( $number ) === $number ? (int) $number : null;
+		}
+		return $number;
+	}
+
+	private function name_rating( string $name, string $kind ): int|float|null {
+		$numeric = '(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?|\.[0-9]+';
+		$unit = 'tons' === $kind ? 'tons?' : 'k?\s*(?:-\s*)?btu(?:\s*\/\s*h(?:r|our)?)?';
+		$pattern = '/(?<![a-zA-Z0-9.,+\/-])(' . $numeric . ')\s*(?:-\s*)?' . $unit . '(?![a-zA-Z0-9])/i';
+		preg_match_all( $pattern, $name, $matches, PREG_OFFSET_CAPTURE );
+		$rating = null;
+		foreach ( $matches[0] as $match ) {
+			$prefix = substr( $name, 0, $match[1] );
+			if ( 1 === preg_match( '/[0-9]\s*k?\s*(?:[-–—\/]|to|or)\s*$/iu', $prefix ) ) {
+				return null;
+			}
+			$parsed = $this->parse_rating( $match[0], $kind );
+			if ( null === $parsed || ( null !== $rating && $rating !== $parsed ) ) {
+				return null;
+			}
+			$rating = $parsed;
+		}
+		return $rating;
 	}
 
 	private function normalize_type( string $value ): string {

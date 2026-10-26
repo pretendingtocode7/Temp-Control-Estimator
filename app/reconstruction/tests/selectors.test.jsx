@@ -5,12 +5,15 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CustomerStep } from "../src/components/CustomerStep.jsx";
 import { EquipmentPicker } from "../src/components/EquipmentPicker.jsx";
 import { SystemsStep } from "../src/components/SystemsStep.jsx";
 import { PricingStep } from "../src/components/PricingStep.jsx";
+import { sumEquipment } from "../src/lib/utils.js";
 
 afterEach(() => {
   cleanup();
@@ -44,66 +47,426 @@ describe("customer selection", () => {
   });
 });
 
-describe("equipment picker", () => {
-  it("requests the selected type once and filters the returned items locally", async () => {
-    const first = {
-      item_id: "10000000001",
-      name: "Fixture Furnace One",
-      brand: "Fixture Brand",
-      js_part_number: "JS-ONE",
-      short_description: "First scope",
-      rate: 3200,
+function equipmentResponse(items, overrides = {}) {
+  return {
+    items,
+    total: items.length,
+    page: 1,
+    per_page: 50,
+    has_more: false,
+    facets: { btus: [80000, 100000], tons: [1.5, 2] },
+    ...overrides,
+  };
+}
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+function packageItem(overrides = {}) {
+  return {
+    item_id: "10000000001",
+    selection_category: "package",
+    name: "Fixture 1.5 ton 100000 BTU Package",
+    is_composite: true,
+    tons: 1.5,
+    btu_input: 100000,
+    short_description: "Complete catalog package scope",
+    rate: 5000,
+    ...overrides,
+  };
+}
+function renderPicker(api, props = {}) {
+  const onPick = vi.fn(),
+    onClose = vi.fn();
+  render(
+    <EquipmentPicker
+      api={api}
+      initialCategory="package"
+      onPick={onPick}
+      onClose={onClose}
+      {...props}
+    />,
+  );
+  return { onPick, onClose };
+}
+
+describe("unified equipment picker", () => {
+  it("coalesces rapid typing until 200ms after the final change and cancels pending work on unmount", async () => {
+    vi.useFakeTimers();
+    const api = {
+      searchEquipmentSelector: vi.fn().mockResolvedValue(equipmentResponse([])),
     };
-    const second = {
-      item_id: "10000000002",
-      name: "Fixture Furnace Two",
-      mfg_part_number: "MFG-TWO",
-      short_description: "Second scope",
-      rate: 4100,
-    };
-    const api = { searchEquipment: vi.fn().mockResolvedValue([first, second]) };
-    const onPick = vi.fn();
-    const onClose = vi.fn();
-    render(
+    const { unmount } = render(
       <EquipmentPicker
         api={api}
-        type="furnace"
-        label="Furnace"
-        onPick={onPick}
-        onClose={onClose}
+        initialCategory="package"
+        onPick={vi.fn()}
+        onClose={vi.fn()}
       />,
     );
-    await screen.findByText(first.name);
-    expect(api.searchEquipment).toHaveBeenCalledExactlyOnceWith({
-      type: "furnace",
-      limit: 100,
+    await act(() => vi.advanceTimersByTimeAsync(199));
+    expect(api.searchEquipmentSelector).not.toHaveBeenCalled();
+    const search = screen.getByRole("searchbox", { name: "Search equipment" });
+    fireEvent.change(search, { target: { value: "f" } });
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    fireEvent.change(search, { target: { value: "fu" } });
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    fireEvent.change(search, { target: { value: "furnace" } });
+    await act(() => vi.advanceTimersByTimeAsync(199));
+    expect(api.searchEquipmentSelector).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
+      category: "package",
+      q: "furnace",
+      btu: "",
+      tons: "",
+      page: 1,
+      limit: 50,
     });
+    fireEvent.change(search, { target: { value: "cancelled after unmount" } });
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(1);
+  });
 
-    fireEvent.change(screen.getByRole("searchbox"), {
-      target: { value: "mfg-two" },
+  it("cannot select an item returned under a different category", async () => {
+    const wrongCategory = packageItem({
+      item_id: "wrong-ac",
+      name: "Unexpected AC result",
+      selection_category: "ac",
+      is_composite: false,
     });
-    expect(screen.queryByText(first.name)).toBeNull();
+    const valid = packageItem({
+      item_id: "valid-package",
+      name: "Valid package result",
+    });
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValue(equipmentResponse([wrongCategory, valid])),
+    };
+    const { onPick } = renderPicker(api);
+    const wrongButton = await screen.findByRole("button", {
+      name: /Unexpected AC result/,
+    });
+    expect(wrongButton.disabled).toBe(true);
+    fireEvent.click(wrongButton);
+    expect(onPick).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByRole("button", { name: /Fixture Furnace Two/ }),
+      screen.getByRole("button", { name: /Valid package result/ }),
     );
-    expect(onPick).toHaveBeenCalledWith(second);
-    expect(api.searchEquipment).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledExactlyOnceWith(valid);
+  });
 
-    fireEvent.change(screen.getByRole("searchbox"), {
-      target: { value: "js-one" },
+  it("uses one category picker, preserves parent package capacities, and selects the returned item unchanged", async () => {
+    const item = packageItem({
+      component_items: [{ tons: 2, btu_input: 80000 }],
     });
-    expect(screen.getByText(first.name)).toBeTruthy();
-    expect(screen.queryByText(second.name)).toBeNull();
-    fireEvent.change(screen.getByRole("searchbox"), {
-      target: { value: "no matching package" },
-    });
-    expect(
-      screen.getByText(
-        "No active Package-tagged items match. Check the Package tag in Zoho Books.",
+    const api = {
+      searchEquipmentSelector: vi.fn().mockResolvedValue(
+        equipmentResponse([item], {
+          facets: { btus: [100000], tons: [1.5] },
+        }),
       ),
-    ).toBeTruthy();
+    };
+    const { onPick, onClose } = renderPicker(api);
+    await screen.findByText(item.name);
+    for (const name of ["Package", "AC", "Furnace", "Coil"])
+      expect(screen.getByRole("button", { name, exact: true })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Package", exact: true })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
+      category: "package",
+      q: "",
+      btu: "",
+      tons: "",
+      page: 1,
+      limit: 50,
+    });
+    const tons = screen.getByRole("combobox", { name: "Tonnage" });
+    expect(
+      within(tons)
+        .getAllByRole("option")
+        .map((option) => option.value),
+    ).toEqual(["", "1.5"]);
+    expect(
+      within(screen.getByRole("combobox", { name: "BTU" }))
+        .getAllByRole("option")
+        .map((option) => option.value),
+    ).toEqual(["", "100000"]);
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(item.name) }),
+    );
+    expect(onPick).toHaveBeenCalledExactlyOnceWith(item);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends combined category/search/capacity filters to the server and finds a match beyond the first 100 catalog items", async () => {
+    const catalog = Array.from({ length: 151 }, (_, index) =>
+      packageItem({
+        item_id: String(10000000100 + index),
+        name: `Fixture package ${index}`,
+        tons: 2,
+        btu_input: 80000,
+      }),
+    );
+    catalog[150] = packageItem({
+      item_id: "10000000999",
+      name: "Distant catalog match",
+      tons: 1.5,
+      btu_input: 100000,
+    });
+    const api = {
+      searchEquipmentSelector: vi.fn(
+        async ({ category, q, btu, tons, page, limit }) => {
+          const matches = catalog.filter(
+            (item) =>
+              item.selection_category === category &&
+              (!q || item.name.toLowerCase().includes(q.toLowerCase())) &&
+              (!btu || item.btu_input === Number(btu)) &&
+              (!tons || item.tons === Number(tons)),
+          );
+          return equipmentResponse(
+            matches.slice((page - 1) * limit, page * limit),
+            {
+              total: matches.length,
+              page,
+              has_more: page * limit < matches.length,
+            },
+          );
+        },
+      ),
+    };
+    const { onPick } = renderPicker(api);
+    await screen.findByText("Fixture package 0");
+    expect(screen.queryByText("Distant catalog match")).toBeNull();
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search equipment" }),
+      { target: { value: "Distant" } },
+    );
+    await screen.findByText("Distant catalog match");
+    fireEvent.change(screen.getByRole("combobox", { name: "BTU" }), {
+      target: { value: "100000" },
+    });
+    await screen.findByText("Distant catalog match");
+    fireEvent.change(screen.getByRole("combobox", { name: "Tonnage" }), {
+      target: { value: "1.5" },
+    });
+    await screen.findByText("Distant catalog match");
+    expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
+      category: "package",
+      q: "Distant",
+      btu: "100000",
+      tons: "1.5",
+      page: 1,
+      limit: 50,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Distant catalog match/ }),
+    );
+    expect(onPick).toHaveBeenCalledWith(catalog[150]);
+  });
+
+  it("pages server results, resets to page one after filtering, and clears both capacities on category change", async () => {
+    const api = {
+      searchEquipmentSelector: vi.fn(async ({ category, q, btu, tons, page }) =>
+        equipmentResponse(
+          [
+            packageItem({
+              item_id: String(page),
+              name: `${category} page ${page}`,
+              selection_category: category,
+            }),
+          ],
+          { page, total: 120, has_more: page < 3 },
+        ),
+      ),
+    };
+    renderPicker(api);
+    await screen.findByText("package page 1");
+    expect(screen.getByRole("button", { name: /^Previous/ }).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Next/ }));
+    await screen.findByText("package page 2");
+    expect(api.searchEquipmentSelector.mock.lastCall[0].page).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: /^Next/ }));
+    await screen.findByText("package page 3");
+    expect(screen.getByRole("button", { name: /^Next/ }).disabled).toBe(true);
+    expect(screen.getByText(/120 matching/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Previous/ }));
+    await screen.findByText("package page 2");
+    fireEvent.change(screen.getByRole("combobox", { name: "BTU" }), {
+      target: { value: "100000" },
+    });
+    await screen.findByText("package page 1");
+    fireEvent.change(screen.getByRole("combobox", { name: "Tonnage" }), {
+      target: { value: "1.5" },
+    });
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector.mock.lastCall[0].tons).toBe("1.5"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AC", exact: true }));
+    await screen.findByText("ac page 1");
+    expect(screen.getByRole("combobox", { name: "BTU" }).value).toBe("");
+    expect(screen.getByRole("combobox", { name: "Tonnage" }).value).toBe("");
+    expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
+      category: "ac",
+      q: "",
+      btu: "",
+      tons: "",
+      page: 1,
+      limit: 50,
+    });
+  });
+
+  it("clears old choices immediately on filter change and ignores a late success after a newer response", async () => {
+    const old = packageItem({ name: "Old visible package" });
+    const late = deferred(),
+      current = deferred();
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValueOnce(equipmentResponse([old]))
+        .mockImplementationOnce(() => late.promise)
+        .mockImplementationOnce(() => current.promise),
+    };
+    const { onPick } = renderPicker(api);
+    const oldButton = await screen.findByRole("button", {
+      name: /Old visible package/,
+    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search equipment" }),
+      { target: { value: "A" } },
+    );
+    expect(screen.queryByText(old.name)).toBeNull();
+    fireEvent.click(oldButton);
+    expect(onPick).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(2),
+    );
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search equipment" }),
+      { target: { value: "B" } },
+    );
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(3),
+    );
+    const newer = packageItem({
+      item_id: "10000000002",
+      name: "Current B package",
+    });
+    await act(async () => current.resolve(equipmentResponse([newer])));
+    await screen.findByText(newer.name);
+    await act(async () =>
+      late.resolve(
+        equipmentResponse([packageItem({ name: "Late A package" })]),
+      ),
+    );
+    expect(screen.queryByText("Late A package")).toBeNull();
+    expect(screen.getByText(newer.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Current B package/ }));
+    expect(onPick).toHaveBeenCalledExactlyOnceWith(newer);
+  });
+
+  it.each(["BTU", "Tonnage", "category"])(
+    "clears selectable results immediately when %s changes",
+    async (control) => {
+      const first = packageItem({ name: "Previously selectable package" });
+      const pending = deferred();
+      const api = {
+        searchEquipmentSelector: vi
+          .fn()
+          .mockResolvedValueOnce(equipmentResponse([first]))
+          .mockImplementationOnce(() => pending.promise),
+      };
+      const { onPick } = renderPicker(api);
+      const oldButton = await screen.findByRole("button", {
+        name: /Previously selectable package/,
+      });
+      if (control === "category")
+        fireEvent.click(
+          screen.getByRole("button", { name: "Coil", exact: true }),
+        );
+      else
+        fireEvent.change(screen.getByRole("combobox", { name: control }), {
+          target: { value: control === "BTU" ? "100000" : "1.5" },
+        });
+      expect(screen.queryByText(first.name)).toBeNull();
+      fireEvent.click(oldButton);
+      expect(onPick).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(2),
+      );
+      await act(async () => pending.resolve(equipmentResponse([])));
+    },
+  );
+
+  it("ignores late errors after a category change and exposes only the current request's failure", async () => {
+    const late = deferred(),
+      current = deferred();
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockImplementationOnce(() => late.promise)
+        .mockImplementationOnce(() => current.promise)
+        .mockRejectedValueOnce(new Error("Current furnace failure")),
+    };
+    renderPicker(api);
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(1),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AC", exact: true }));
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector).toHaveBeenCalledTimes(2),
+    );
+    const ac = packageItem({ selection_category: "ac", name: "Current AC" });
+    await act(async () => current.resolve(equipmentResponse([ac])));
+    await screen.findByText(ac.name);
+    await act(async () => late.reject(new Error("Late package failure")));
+    expect(screen.queryByText("Late package failure")).toBeNull();
+    expect(screen.getByText(ac.name)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Furnace", exact: true }),
+    );
+    expect(screen.queryByText(ac.name)).toBeNull();
+    await screen.findByText("Current furnace failure");
+  });
+
+  it("shows an honest empty state and All-only filters when the category has no capacity ratings", async () => {
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValue(
+          equipmentResponse([], { facets: { btus: [], tons: [] } }),
+        ),
+    };
+    renderPicker(api, { initialCategory: "coil" });
+    await screen.findByText(/No .*match/i);
+    expect(
+      screen
+        .getByRole("button", { name: "Coil", exact: true })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("No BTU ratings available")).toBeTruthy();
+    expect(screen.getByText("No tonnage ratings available")).toBeTruthy();
+    for (const name of ["BTU", "Tonnage"])
+      expect(
+        within(screen.getByRole("combobox", { name }))
+          .getAllByRole("option")
+          .map((option) => option.value),
+      ).toEqual([""]);
+    expect(screen.queryByRole("button", { name: /Unnamed part/ })).toBeNull();
   });
 });
 
@@ -128,15 +491,135 @@ function SystemsHarness({
 }
 
 describe("system slots and item edits", () => {
-  it("uses the coil API type and initializes its editable description", async () => {
-    const coil = {
+  it.each(["", "Edited package scope"])(
+    "preserves description %j and project notes when the same package is selected again",
+    async (description) => {
+      const returned = packageItem({
+        notes: "Provider notes",
+        description: "Provider description",
+      });
+      const previous = {
+        ...returned,
+        description,
+        notes: "Keep project-specific notes",
+      };
+      const permit = {
+        item_id: "permit",
+        name: "Municipal Permit",
+        rate: 125,
+        description: "Keep permit scope",
+      };
+      const api = {
+        searchEquipmentSelector: vi
+          .fn()
+          .mockResolvedValue(equipmentResponse([returned])),
+      };
+      const onChange = vi.fn();
+      render(
+        <SystemsHarness
+          api={api}
+          onChange={onChange}
+          initialSystems={[
+            {
+              system_number: 1,
+              system_label: "Main System",
+              equipment: { package: previous, permit },
+            },
+          ]}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^Change/ }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Select equipment",
+      });
+      const pick = await within(dialog).findByRole("button", {
+        name: new RegExp(returned.name),
+      });
+      fireEvent.click(pick);
+      const equipment = onChange.mock.lastCall[0][0].equipment;
+      expect(equipment.package.description).toBe(description);
+      expect(equipment.package.notes).toBe("Keep project-specific notes");
+      expect(equipment.permit).toBe(permit);
+      expect(previous.description).toBe(description);
+      expect(
+        screen.getByRole("textbox", {
+          name: "Edit Package estimate description",
+        }).value,
+      ).toBe(description);
+    },
+  );
+
+  it("opens a selected main item's category for Change and retains system label editing", async () => {
+    const original = packageItem({
+      item_id: "old-furnace",
+      name: "Original furnace",
+      selection_category: "furnace",
+      rate: 1200,
+    });
+    const replacement = packageItem({
+      item_id: "new-furnace",
+      name: "Replacement furnace",
+      selection_category: "furnace",
+      short_description: "Replacement wording",
+      rate: 1500,
+    });
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValue(equipmentResponse([replacement])),
+    };
+    const onChange = vi.fn();
+    render(
+      <SystemsHarness
+        api={api}
+        onChange={onChange}
+        initialSystems={[
+          {
+            system_number: 1,
+            system_label: "Main System",
+            equipment: { furnace: original },
+          },
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "System 1 label" }), {
+      target: { value: "Upstairs system" },
+    });
+    expect(onChange.mock.lastCall[0][0].system_label).toBe("Upstairs system");
+    fireEvent.click(screen.getByRole("button", { name: /^Change/ }));
+    await screen.findByText(replacement.name);
+    expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
+      category: "furnace",
+      q: "",
+      btu: "",
+      tons: "",
+      page: 1,
+      limit: 50,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Replacement furnace/ }),
+    );
+    expect(onChange.mock.lastCall[0][0].equipment.furnace.item_id).toBe(
+      "new-furnace",
+    );
+    expect(onChange.mock.lastCall[0][0].system_label).toBe("Upstairs system");
+  });
+
+  it("opens one selection tool at Package and selects a coil with its catalog description", async () => {
+    const coil = packageItem({
       item_id: "10000000003",
+      selection_category: "coil",
       name: "Fixture Coil",
       short_description: "Catalog coil scope",
       description: "Other provider wording",
+      is_composite: false,
       rate: 600,
+    });
+    const api = {
+      searchEquipmentSelector: vi.fn(async ({ category }) =>
+        equipmentResponse(category === "coil" ? [coil] : []),
+      ),
     };
-    const api = { searchEquipment: vi.fn().mockResolvedValue([coil]) };
     const onChange = vi.fn();
     render(
       <SystemsHarness
@@ -147,26 +630,171 @@ describe("system slots and item edits", () => {
         ]}
       />,
     );
+    expect(
+      screen.getAllByRole("button", { name: "Select equipment", exact: true }),
+    ).toHaveLength(1);
+    expect(
+      screen.queryByRole("button", {
+        name: /^\+ Add (furnace|condenser|evaporator)/i,
+      }),
+    ).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "+ Add evaporator coil" }),
+      screen.getByRole("button", { name: "Select equipment", exact: true }),
     );
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector).toHaveBeenCalledWith({
+        category: "package",
+        q: "",
+        btu: "",
+        tons: "",
+        page: 1,
+        limit: 50,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Coil", exact: true }));
     await screen.findByText(coil.name);
-    expect(api.searchEquipment).toHaveBeenCalledWith({
-      type: "evaporator_coil",
-      limit: 100,
-    });
     fireEvent.click(screen.getByRole("button", { name: /Fixture Coil/ }));
     expect(
-      screen.getByRole("textbox", {
-        name: "Edit Evaporator Coil estimate description",
-      }).value,
+      screen.getByRole("textbox", { name: "Edit Coil estimate description" })
+        .value,
     ).toBe("Catalog coil scope");
     expect(onChange.mock.lastCall[0][0].equipment.coil).toEqual({
       ...coil,
       description: "Catalog coil scope",
     });
     expect(coil.description).toBe("Other provider wording");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("replaces separate main components with one priced package while preserving selected legacy accessories", async () => {
+    const selectedPackage = packageItem();
+    const permit = {
+      item_id: "permit",
+      name: "Municipal Permit",
+      rate: 125,
+      description: "Preserved permit wording",
+    };
+    const thermostat = {
+      item_id: "thermostat",
+      name: "Existing thermostat",
+      rate: 100,
+      description: "Preserved thermostat wording",
+    };
+    const initial = [
+      {
+        system_number: 1,
+        system_label: "Main System",
+        equipment: {
+          furnace: { item_id: "furnace", name: "Old furnace", rate: 3200 },
+          condenser: { item_id: "ac", name: "Old AC", rate: 2000 },
+          coil: { item_id: "coil", name: "Old coil", rate: 600 },
+          permit,
+          thermostat,
+        },
+      },
+    ];
+    const api = {
+      searchEquipmentSelector: vi
+        .fn()
+        .mockResolvedValue(equipmentResponse([selectedPackage])),
+    };
+    const onChange = vi.fn();
+    render(
+      <SystemsHarness api={api} onChange={onChange} initialSystems={initial} />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select equipment", exact: true }),
+    );
+    await screen.findByText(selectedPackage.name);
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(selectedPackage.name) }),
+    );
+    const updated = onChange.mock.lastCall[0];
+    expect(Object.keys(updated[0].equipment).sort()).toEqual([
+      "package",
+      "permit",
+      "thermostat",
+    ]);
+    expect(updated[0].equipment.package.item_id).toBe(selectedPackage.item_id);
+    expect(updated[0].equipment.permit).toBe(permit);
+    expect(updated[0].equipment.thermostat).toBe(thermostat);
+    expect(sumEquipment(updated)).toBe(5225);
+    expect(initial[0].equipment.furnace.item_id).toBe("furnace");
+    expect(
+      screen.getByRole("textbox", { name: "Edit Permit estimate description" })
+        .value,
+    ).toBe(permit.description);
+    expect(
+      screen.getByRole("textbox", {
+        name: "Edit Thermostat estimate description",
+      }).value,
+    ).toBe(thermostat.description);
+    expect(screen.getByText(/package.*replac/i)).toBeTruthy();
+  });
+
+  it.each([
+    ["AC", "ac", "condenser"],
+    ["Furnace", "furnace", "furnace"],
+    ["Coil", "coil", "coil"],
+  ])(
+    "selecting %s removes a package but preserves the other component slots and accessories",
+    async (label, category, slot) => {
+      const selected = packageItem({
+        item_id: "replacement",
+        name: `Replacement ${label}`,
+        selection_category: category,
+        is_composite: false,
+        short_description: "New selected wording",
+        rate: 400,
+      });
+      const equipment = {
+        package: packageItem({ description: "Old package wording" }),
+        furnace: { item_id: "furnace", name: "Existing furnace", rate: 100 },
+        condenser: { item_id: "ac", name: "Existing AC", rate: 200 },
+        coil: { item_id: "coil", name: "Existing coil", rate: 300 },
+        permit: {
+          item_id: "permit",
+          name: "Permit",
+          rate: 125,
+          description: "Existing permit wording",
+        },
+      };
+      const api = {
+        searchEquipmentSelector: vi.fn(async ({ category: requested }) =>
+          equipmentResponse(requested === category ? [selected] : []),
+        ),
+      };
+      const onChange = vi.fn();
+      render(
+        <SystemsHarness
+          api={api}
+          onChange={onChange}
+          initialSystems={[
+            { system_number: 1, system_label: "Main System", equipment },
+          ]}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Select equipment", exact: true }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: label, exact: true }));
+      await screen.findByText(selected.name);
+      fireEvent.click(
+        screen.getByRole("button", { name: new RegExp(selected.name) }),
+      );
+      const updated = onChange.mock.lastCall[0][0].equipment;
+      expect(updated).not.toHaveProperty("package");
+      expect(updated[slot]).toEqual({
+        ...selected,
+        description: "New selected wording",
+      });
+      for (const key of ["furnace", "condenser", "coil", "permit"].filter(
+        (key) => key !== slot,
+      ))
+        expect(updated[key]).toBe(equipment[key]);
+      expect(equipment.package.description).toBe("Old package wording");
+    },
+  );
 
   it("edits only the targeted system, keeps blank descriptions, and exposes rate editing only for permits", () => {
     const furnace = {

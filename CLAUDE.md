@@ -10,6 +10,16 @@ installer ZIP, or substitute older v0.2.38/v0.3.0 code. See
 Phase descriptions below retain historical context and are not a complete
 description of the v0.4.8 runtime.
 
+The subsequently authorized v0.4.12 interface combines Package, AC, Furnace and
+Coil in one picker with server-side BTU/tonnage filters. Read
+`docs/releases/v0.4.12-unified-selector.md` before changing catalog, selection or
+pricing behavior. The Package reporting tag still gates all four categories;
+packages and core components are mutually exclusive within a system. Explicit
+runtime overrides are projected by `app/reconstruction/tools/prepare-release.py`
+into a separate release tree; keep all original reference bytes intact. Run
+`npm test` and `npm run test:selector` in `app/reconstruction/` for current checks.
+The older `test:parity` suite/evidence describes the historical interface.
+
 ## What this is
 
 WordPress plugin for Temp Control HVAC field techs to generate Zoho Books estimates + CRM Deals

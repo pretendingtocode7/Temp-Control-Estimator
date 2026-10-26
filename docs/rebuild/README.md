@@ -14,6 +14,10 @@ service-worker delivery override into a separate installable tree. See the
 [v0.4.10 worker correction and packaging instructions](service-worker-fix.md).
 Running the development build itself does not modify a website or credentials.
 
+The current authorized interface uses the [unified Package/AC/Furnace/Coil
+selector](../releases/v0.4.12-unified-selector.md), with BTU/tonnage filters and
+explicit package pricing. Historical reference-screen evidence remains archived.
+
 ## Reproducible development setup
 
 From `app/reconstruction/`:
@@ -23,7 +27,7 @@ npm ci
 npm run verify:reference
 npm run build
 npm test
-npm run test:parity
+npm run test:selector
 ```
 
 The lockfile pins the dependency tree. Node 24.14.1 was used for validation;
@@ -32,6 +36,10 @@ HTTP fixture and an ephemeral native Chrome profile, with external hosts
 blocked and every business API response mocked. See the Playwright config
 for the Chrome path override. No connected WordPress/Zoho/email account is
 needed to run these checks.
+
+`test:parity` retains the historical exact-screen comparison for the frontend
+before the selector redesign. Current behavior and layout are validated by
+`test:selector`; the old reference screenshots and request/PDF evidence are kept.
 
 `src/entry.jsx` produces a self-contained classic IIFE, not a module script,
 plus `estimate-builder.css` and a classic `service-worker.js`. Build target is

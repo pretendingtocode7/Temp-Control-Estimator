@@ -240,6 +240,23 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
       );
     },
 
+    searchEquipmentSelector({
+      category = "package",
+      q,
+      btu,
+      tons,
+      page = 1,
+      limit = 50,
+    } = {}) {
+      const search = () =>
+        requestWithReadRetry("GET", "/equipment", {
+          query: { selector: 1, category, q, btu, tons, page, limit },
+        });
+      return catalogWarmupPromise
+        ? catalogWarmupPromise.catch(() => null).then(search)
+        : search();
+    },
+
     listTemplates(type) {
       return requestWithReadRetry("GET", "/templates", { query: { type } });
     },

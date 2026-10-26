@@ -127,7 +127,7 @@ namespace {
 	function catalog_item( string $id = ITEM_A, array $overrides = array() ): array {
 		return array_replace( array(
 			'item_id' => $id, 'name' => 'Synthetic Furnace', 'sku' => 'FIXTURE-SKU',
-			'rate' => 3200, 'status' => 'active', 'cf_equipment_type' => 'furnace',
+			'rate' => 3200, 'status' => 'active', 'is_combo_product' => false, 'cf_equipment_type' => 'furnace',
 			'cf_brand' => 'Fixture Brand', 'cf_model' => 'FIXTURE-80', 'description' => 'Synthetic scope',
 			'tags' => array( catalog_tag() ),
 		), $overrides );
@@ -136,7 +136,7 @@ namespace {
 		return array( 'code' => 0, 'items' => $items, 'page_context' => array( 'page' => $page, 'has_more_page' => $has_more ) );
 	}
 	function catalog_key( string $org = ORG_A, string $tag = TAG_A, string $option = OPTION_A ): string {
-		return 'books_items_package_tag_v1_' . $org . '_' . $tag . '_' . $option;
+		return 'books_items_package_tag_v2_' . $org . '_' . $tag . '_' . $option;
 	}
 	function catalog_calls( string $path, ?string $org = null ): array {
 		return array_values( array_filter( Zoho_API::instance()->calls, static fn ( array $call ): bool =>
@@ -147,6 +147,20 @@ namespace {
 		global $passed, $failed;
 		try { $case(); $passed++; echo "PASS " . $name . "\n"; }
 		catch ( Throwable $error ) { $failed++; echo "FAIL " . $name . ': ' . $error->getMessage() . "\n"; }
+	}
+	function normalize_catalog_fixture( array $overrides = array(), string $id = ITEM_A ): array {
+		$catalog = reset_catalog_test();
+		route_catalog( '/items/' . $id, array( 'item' => catalog_item( $id, $overrides ) ) );
+		$result = $catalog->get_item( $id );
+		check_catalog( ! is_wp_error( $result ), 'Synthetic tagged item can be normalized' );
+		return $result;
+	}
+	function selector_error( mixed $result ): void {
+		check_catalog( is_wp_error( $result ), 'Invalid selector input must return WP_Error' );
+		same_catalog( 400, $result->get_error_data()['status'] ?? null, 'Invalid selector input has HTTP 400' );
+	}
+	function selection_system( array $equipment ): array {
+		return array( array( 'system_number' => 1, 'system_label' => 'Synthetic system', 'equipment' => $equipment ) );
 	}
 
 	run_catalog_case( 'Package tag replaces checkbox for true, false and absent values', function (): void {
@@ -360,6 +374,11 @@ namespace {
 		'invalid item ID' => static function ( array $row ): array { $row['item_id'] = '123'; return $row; },
 		'non-numeric rate' => static function ( array $row ): array { $row['rate'] = 'not-a-price'; return $row; },
 		'numeric string rate' => static function ( array $row ): array { $row['rate'] = '3200'; return $row; },
+		'missing selector category' => static function ( array $row ): array { unset( $row['selection_category'] ); return $row; },
+		'non-boolean composite flag' => static function ( array $row ): array { $row['is_composite'] = 'false'; return $row; },
+		'category and equipment type conflict' => static function ( array $row ): array { $row['selection_category'] = 'package'; return $row; },
+		'string tonnage' => static function ( array $row ): array { $row['tons'] = '1.5'; return $row; },
+		'string BTU' => static function ( array $row ): array { $row['btu_input'] = '80000'; return $row; },
 	);
 	foreach ( $cache_mutations as $label => $mutate ) {
 		run_catalog_case( 'rebuilds invalid cached metadata: ' . $label, function () use ( $mutate ): void {
@@ -389,6 +408,285 @@ namespace {
 		check_catalog( isset( Zoho_Cache::instance()->values[ catalog_key() ], Zoho_Cache::instance()->values[ catalog_key( ORG_B, TAG_B, OPTION_B ) ] ), 'Both organization-specific keys coexist' );
 		same_catalog( 1, count( catalog_calls( '/reportingtags', ORG_A ) ), 'Org A metadata is memoized only for Org A' );
 		same_catalog( 1, count( catalog_calls( '/reportingtags', ORG_B ) ), 'Org B metadata is separately resolved' );
+	} );
+
+	run_catalog_case( 'composite truth and explicit classification are separate from Package eligibility', function (): void {
+		$package = normalize_catalog_fixture( array(
+			'is_combo_product' => true, 'cf_equipment_type' => 'furnace',
+			'name' => 'Synthetic AC and Furnace with Evaporator Coil', 'cf_category_1' => 'Package',
+		) );
+		same_catalog( 'package', $package['selection_category'], 'An actual composite is one package, despite component descriptors' );
+		same_catalog( 'package', $package['equipment_type'], 'Canonical package type is retained for downstream slot validation' );
+		same_catalog( true, $package['is_composite'], 'Actual boolean composite flag is retained' );
+		foreach ( array(
+			array( 'Synthetic Series AC - 2 Ton', 'ac', 'condenser' ),
+			array( 'Synthetic Single-Stage Furnace - 80,000 BTU', 'furnace', 'furnace' ),
+			array( 'Synthetic Evaporator Coil - 2 Ton', 'coil', 'evaporator_coil' ),
+		) as [ $name, $category, $type ] ) {
+			$item = normalize_catalog_fixture( array( 'name' => $name, 'cf_equipment_type' => null, 'cf_category_1' => 'Package' ) );
+			same_catalog( $category, $item['selection_category'], 'Explicit bounded component descriptor determines category' );
+			same_catalog( $type, $item['equipment_type'], 'Component gets its canonical equipment type' );
+			same_catalog( false, $item['is_composite'], 'Tagged component is not made composite by its Category 1 field' );
+			same_catalog( true, $item['for_estimate'], 'Actual Package reporting tag continues to authorize components' );
+		}
+		$item = normalize_catalog_fixture( array( 'name' => 'Synthetic AC', 'cf_equipment_type' => 'furnace' ) );
+		same_catalog( 'furnace', $item['selection_category'], 'Recognized structured type takes precedence over name fallback' );
+	} );
+
+	run_catalog_case( 'unverified composite flags and ambiguous descriptors never enter a selector category', function (): void {
+		foreach ( array( null, 'false', 'true', 0, 1, array() ) as $flag ) {
+			$item = normalize_catalog_fixture( array( 'is_combo_product' => $flag ) );
+			same_catalog( '', $item['selection_category'], 'Only an actual boolean provider composite flag supports classification' );
+			same_catalog( '', $item['equipment_type'], 'Malformed composite metadata cannot retain a guessed core type' );
+			same_catalog( true, $item['for_estimate'], 'Classification does not alter verified tag eligibility' );
+		}
+		foreach ( array( 'Synthetic AC + Furnace', 'Synthetic ACME FurnaceParts', 'Synthetic Model-36' ) as $name ) {
+			$item = normalize_catalog_fixture( array( 'name' => $name, 'cf_equipment_type' => null ) );
+			same_catalog( '', $item['selection_category'], 'Ambiguous or embedded words do not classify a component' );
+		}
+		$catalog = reset_catalog_test();
+		$missing_flag = catalog_item();
+		unset( $missing_flag['is_combo_product'] );
+		route_catalog( '/items/' . ITEM_A, array( 'item' => $missing_flag ) );
+		$normalized = $catalog->get_item( ITEM_A );
+		same_catalog( '', $normalized['selection_category'], 'Absent composite flag cannot authorize selector classification' );
+		same_catalog( true, $normalized['for_estimate'], 'Absent composite flag does not change independently verified tag eligibility' );
+		route_catalog( '/items', catalog_page( array( $missing_flag ) ) );
+		same_catalog( 0, $catalog->search_selector( array( 'category' => 'furnace' ) )['total'], 'Missing provider flag cannot be guessed from a furnace name' );
+		catalog_error( $catalog->validate_selection( selection_system( array( 'furnace' => array( 'item_id' => ITEM_A ) ) ), array( ITEM_A => $normalized ) ), 'tc_estimate_bad_equipment_selection', 400 );
+		$catalog = reset_catalog_test();
+		route_catalog( '/items', catalog_page( array(
+			catalog_item( ITEM_A, array( 'name' => 'Synthetic Model-36', 'cf_equipment_type' => null ) ),
+			catalog_item( ITEM_B, array( 'is_combo_product' => 'false' ) ),
+		) ) );
+		foreach ( array( 'package', 'ac', 'furnace', 'coil' ) as $category ) {
+			same_catalog( 0, $catalog->search_selector( array( 'category' => $category ) )['total'], 'Unknown metadata cannot be relabeled into requested selector category' );
+		}
+		same_catalog( array(), $catalog->search( array( 'type' => 'furnace' ) ), 'Legacy array search also stops relabeling untyped items' );
+	} );
+
+	run_catalog_case( 'capacity normalization accepts complete positive comma and unit forms', function (): void {
+		foreach ( array(
+			array( 80000, 80000 ), array( '100,000', 100000 ), array( '80k', 80000 ),
+			array( '80 K BTU', 80000 ), array( '100,000 BTU/hr', 100000 ), array( '80k BTU/hr', 80000 ),
+		) as [ $raw, $expected ] ) {
+			$item = normalize_catalog_fixture( array( 'cf_btu_input' => $raw, 'cf_btu_output' => $raw ) );
+			same_catalog( $expected, $item['btu_input'], 'Structured input BTU normalizes its complete value' );
+			same_catalog( $expected, $item['btu_output'], 'Structured output BTU uses the same strict numeric parser' );
+		}
+		foreach ( array( 1.5, '1.5', '1.50 tons', '1.5 Ton' ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'cf_tons' => $raw ) );
+			same_catalog( 1.5, $item['tons'], 'Tonnage keeps decimal precision and ignores unit capitalization' );
+		}
+		foreach ( array(
+			array( 'custom_fields' => array( array( 'api_name' => 'cf_btu_input', 'value' => '60,000 BTU' ), array( 'api_name' => 'cf_tons', 'value' => '2.5 tons' ) ) ),
+			array( 'custom_field_hash' => array( 'cf_btu_input' => '60,000 BTU', 'cf_tons' => '2.5 tons' ) ),
+		) as $shape ) {
+			$item = normalize_catalog_fixture( $shape );
+			same_catalog( 60000, $item['btu_input'], 'Custom field collection/hash provides input rating' );
+			same_catalog( 2.5, $item['tons'], 'Custom field collection/hash provides tonnage' );
+		}
+	} );
+
+	run_catalog_case( 'invalid or conflicting structured ratings cannot fall back to a name or model', function (): void {
+		foreach ( array( 0, -1, true, 'NaN', 'Infinity', '80,00', '80k garbage', '60-80k BTU', array( 80000 ) ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'name' => 'Synthetic Furnace - 100,000 BTU', 'cf_btu_input' => $raw ) );
+			same_catalog( null, $item['btu_input'], 'Invalid complete structured value is unknown despite a parseable name' );
+		}
+		foreach ( array( 0, -1, false, '1,5', '2/3 Ton', '2 Ton extra', 'NaN', array( 2 ) ) as $raw ) {
+			$item = normalize_catalog_fixture( array( 'name' => 'Synthetic AC - 3 Ton', 'cf_tons' => $raw ) );
+			same_catalog( null, $item['tons'], 'Invalid structured tonnage is not overwritten with a name guess' );
+		}
+		$item = normalize_catalog_fixture( array(
+			'name' => 'Synthetic Furnace - 3 Ton, 100,000 BTU', 'cf_btu_input' => 60000, 'cf_tons' => 2,
+			'custom_field_hash' => array( 'cf_btu_input' => 80000, 'cf_tons' => 2.5 ),
+		) );
+		same_catalog( null, $item['btu_input'], 'Conflicting aliases/shapes do not select an arbitrary BTU' );
+		same_catalog( null, $item['tons'], 'Conflicting aliases/shapes do not select arbitrary tonnage' );
+		$item = normalize_catalog_fixture( array( 'name' => 'Synthetic AC - 3 Ton, 100,000 BTU', 'cf_btu_input' => 60000, 'cf_tons' => 2 ) );
+		same_catalog( 60000, $item['btu_input'], 'A valid structured rating wins over a conflicting name' );
+		same_catalog( 2.0, $item['tons'], 'A valid structured tonnage wins over a conflicting name' );
+	} );
+
+	run_catalog_case( 'name fallback uses explicit parent capacity tokens only', function (): void {
+		$item = normalize_catalog_fixture( array(
+			'is_combo_product' => true, 'name' => 'Synthetic Package - 1.5 Ton, 100,000 BTU',
+			'mapped_items' => array( array( 'name' => 'Synthetic Evaporator Coil - 2 Ton' ) ),
+		) );
+		same_catalog( 1.5, $item['tons'], 'Package parent rating is not replaced with component coil rating' );
+		same_catalog( 100000, $item['btu_input'], 'Explicit parent BTU is available when structured rating is absent' );
+		same_catalog( null, $item['btu_output'], 'Parent name BTU does not invent a separate output rating' );
+		$item = normalize_catalog_fixture( array( 'name' => 'Synthetic AC - 2.5-ton, 80k BTU' ) );
+		same_catalog( 2.5, $item['tons'], 'Explicit hyphenated tonnage is accepted' );
+		same_catalog( 80000, $item['btu_input'], 'Explicit k BTU name token is accepted' );
+		foreach ( array(
+			'Synthetic Model-X36 80% AFUE 14.3 SEER',
+			'Synthetic 2 Ton / 3 Ton, 60,000 BTU / 80,000 BTU',
+			'Synthetic Furnace - 60–80k BTU',
+			'Synthetic Furnace - 60 to 80k BTU',
+			'Synthetic AC - 1.5–2 Ton',
+		) as $name ) {
+			$item = normalize_catalog_fixture( array( 'name' => $name ) );
+			same_catalog( null, $item['tons'], 'Model digits, efficiency and ambiguous capacities do not become tonnage' );
+			same_catalog( null, $item['btu_input'], 'Model digits, efficiency and ambiguous capacities do not become BTU' );
+		}
+	} );
+
+	run_catalog_case( 'selector combines filters before pagination and keeps category-wide numeric facets', function (): void {
+		$catalog = reset_catalog_test();
+		$items = array();
+		for ( $index = 0; $index < 140; $index++ ) {
+			$id = '93' . str_pad( (string) $index, 9, '0', STR_PAD_LEFT );
+			$items[] = catalog_item( $id, array(
+				'is_combo_product' => true, 'name' => 'Synthetic Package ' . $index,
+				'cf_tons' => array( 1.5, 2, 3 )[ $index % 3 ],
+				'cf_btu_input' => array( 40000, 60000, 100000 )[ $index % 3 ],
+				'cf_js_part_number' => 125 === $index ? 'JS-LATE-NEEDLE' : 'JS-' . $index,
+			) );
+		}
+		$items[] = catalog_item( '94000000001', array( 'cf_equipment_type' => 'condenser', 'name' => 'Synthetic AC', 'cf_tons' => 5, 'cf_btu_input' => 120000 ) );
+		$items[] = catalog_item( '94000000002', array( 'cf_equipment_type' => 'furnace', 'name' => 'Synthetic Furnace', 'cf_btu_input' => 80000 ) );
+		$items[] = catalog_item( '94000000003', array( 'cf_equipment_type' => 'evaporator_coil', 'name' => 'Synthetic Evaporator Coil', 'cf_tons' => 2 ) );
+		$items[] = catalog_item( '94000000004', array( 'is_combo_product' => true, 'name' => 'Synthetic Package unknown rating' ) );
+		route_catalog( '/items', catalog_page( $items ) );
+		$first = $catalog->search_selector();
+		same_catalog( 141, $first['total'], 'Default selector returns only packages, including unknown ratings' );
+		same_catalog( 1, $first['page'], 'Default page is one' );
+		same_catalog( 50, $first['per_page'], 'Default page size is fifty' );
+		same_catalog( 50, count( $first['items'] ), 'Default first page is bounded' );
+		same_catalog( true, $first['has_more'], 'A next page is explicitly indicated' );
+		same_catalog( array( 40000, 60000, 100000 ), $first['facets']['btus'], 'Package BTU facets are sorted numeric values without component ratings' );
+		same_catalog( array( 1.5, 2.0, 3.0 ), $first['facets']['tons'], 'Package tonnage facets are numeric and sorted' );
+		$page_two = $catalog->search_selector( array( 'category' => 'package', 'page' => 2, 'limit' => 100 ) );
+		same_catalog( 41, count( $page_two['items'] ), 'Second page reaches packages beyond the old one-hundred item truncation' );
+		same_catalog( $items[100]['item_id'], $page_two['items'][0]['item_id'], 'Second page offset is applied to filtered category results' );
+		same_catalog( false, $page_two['has_more'], 'Final page has no further results' );
+		$filtered = $catalog->search_selector( array( 'category' => 'package', 'q' => 'late-needle', 'brand' => 'fixture brand', 'btu' => 100000, 'tons' => 3, 'limit' => 1 ) );
+		same_catalog( array( $items[125]['item_id'] ), array_column( $filtered['items'], 'item_id' ), 'JS part search and every numeric/category/brand condition match beyond item one hundred' );
+		same_catalog( 1, $filtered['total'], 'Total reflects all combined conditions before pagination' );
+		same_catalog( $first['facets'], $filtered['facets'], 'Facets remain category-wide despite text, brand, BTU, tonnage and limit filters' );
+		$no_match = $catalog->search_selector( array( 'category' => 'package', 'q' => 'late-needle', 'btu' => 60000, 'tons' => 3 ) );
+		same_catalog( array(), $no_match['items'], 'Numeric and text conditions are ANDed rather than ORed' );
+		same_catalog( 0, $no_match['total'], 'No results retains a truthful zero count' );
+		$past_end = $catalog->search_selector( array( 'category' => 'package', 'page' => 99, 'limit' => 100 ) );
+		same_catalog( array(), $past_end['items'], 'Page beyond the end returns no phantom records' );
+		same_catalog( 141, $past_end['total'], 'Page beyond the end retains category total' );
+		same_catalog( false, $past_end['has_more'], 'Page beyond the end is terminal' );
+		foreach ( array( 'ac' => '94000000001', 'furnace' => '94000000002', 'coil' => '94000000003' ) as $category => $id ) {
+			same_catalog( array( $id ), array_column( $catalog->search_selector( array( 'category' => $category ) )['items'], 'item_id' ), 'Each component category is distinct from packages' );
+		}
+		same_catalog( 1, count( catalog_calls( '/items' ) ), 'Repeated filter and page changes use the complete normalized catalog cache' );
+	} );
+
+	run_catalog_case( 'selector searches all seven original text fields and excludes missing ratings only when filtered', function (): void {
+		foreach ( array( 'name', 'sku', 'cf_brand', 'cf_model', 'cf_js_part_number', 'cf_mfg_part_number', 'description' ) as $field ) {
+			$catalog = reset_catalog_test();
+			route_catalog( '/items', catalog_page( array( catalog_item( ITEM_A, array( 'is_combo_product' => true, $field => 'MixedCase NEEDLE' ) ) ) ) );
+			same_catalog( 1, $catalog->search_selector( array( 'q' => ' needle ' ) )['total'], 'Case-insensitive text search retains the original seven fields' );
+		}
+		$catalog = reset_catalog_test();
+		route_catalog( '/items', catalog_page( array( catalog_item( ITEM_A, array( 'is_combo_product' => true, 'name' => 'Synthetic Package no ratings' ) ) ) ) );
+		same_catalog( 1, $catalog->search_selector()['total'], 'Unfiltered selection includes unknown ratings' );
+		same_catalog( array( 'btus' => array(), 'tons' => array() ), $catalog->search_selector()['facets'], 'Missing ratings do not create a zero facet' );
+		same_catalog( 0, $catalog->search_selector( array( 'btu' => 80000 ) )['total'], 'Unknown BTU cannot satisfy a selected BTU' );
+		same_catalog( 0, $catalog->search_selector( array( 'tons' => 2 ) )['total'], 'Unknown tonnage cannot satisfy selected tonnage' );
+	} );
+
+	run_catalog_case( 'selector rejects invalid filter input rather than silently broadening results', function (): void {
+		$catalog = reset_catalog_test();
+		foreach ( array(
+			array( 'category' => 'other' ), array( 'category' => array( 'package' ) ),
+			array( 'btu' => -1 ), array( 'btu' => 'not-btu' ), array( 'btu' => array( 80000 ) ),
+			array( 'tons' => -1 ), array( 'tons' => 'not-tonnage' ), array( 'tons' => array( 2 ) ),
+			array( 'page' => 'later' ), array( 'page' => '1x' ), array( 'page' => array( 1 ) ),
+			array( 'limit' => 'many' ), array( 'limit' => '50x' ), array( 'limit' => array( 50 ) ),
+		) as $args ) {
+			selector_error( $catalog->search_selector( $args ) );
+		}
+		same_catalog( array(), catalog_calls( '/items' ), 'Malformed filters fail before catalog reads' );
+	} );
+
+	run_catalog_case( 'canonical slots accept one package or separate components with matching accessories', function (): void {
+		$package = normalize_catalog_fixture( array( 'is_combo_product' => true ), ITEM_A );
+		$furnace = normalize_catalog_fixture( array(), ITEM_B );
+		$ac = normalize_catalog_fixture( array( 'cf_equipment_type' => 'condenser' ), '90000000003' );
+		$coil = normalize_catalog_fixture( array( 'cf_equipment_type' => 'evaporator_coil' ), '90000000004' );
+		$thermostat = normalize_catalog_fixture( array( 'cf_equipment_type' => 'thermostat' ), '90000000005' );
+		$map = array_column( array( $package, $furnace, $ac, $coil, $thermostat ), null, 'item_id' );
+		$catalog = Equipment_Catalog::instance();
+		same_catalog( true, $catalog->validate_selection( selection_system( array( 'package' => array( 'item_id' => ITEM_A ), 'thermostat' => array( 'item_id' => $thermostat['item_id'] ) ) ), $map ), 'Package remains a single canonical item with an eligible accessory' );
+		same_catalog( true, $catalog->validate_selection( selection_system( array( 'furnace' => array( 'item_id' => ITEM_B ), 'condenser' => array( 'item_id' => $ac['item_id'] ), 'coil' => array( 'item_id' => $coil['item_id'] ) ) ), $map ), 'Separate matched components use their canonical slots' );
+		$two_systems = array_merge( selection_system( array( 'package' => array( 'item_id' => ITEM_A ) ) ), selection_system( array( 'package' => array( 'item_id' => ITEM_A ) ) ) );
+		$two_systems[1]['system_number'] = 2;
+		same_catalog( true, $catalog->validate_selection( $two_systems, $map ), 'Same catalog item can be selected once in each independent system' );
+	} );
+
+	run_catalog_case( 'missing system numbers retain positional defaults and distinct canonical numbers accept repeated packages', function (): void {
+		$package = normalize_catalog_fixture( array( 'is_combo_product' => true ), ITEM_A );
+		$map = array( ITEM_A => $package );
+		$systems = array(
+			array( 'equipment' => array( 'package' => array( 'item_id' => ITEM_A ) ) ),
+			array( 'equipment' => array( 'package' => array( 'item_id' => ITEM_A ) ) ),
+		);
+		$catalog = Equipment_Catalog::instance();
+		same_catalog( true, $catalog->validate_selection( $systems, $map ), 'Absent numbers default to distinct one-based array positions' );
+		$systems[0]['system_number'] = '3';
+		$systems[1]['system_number'] = 4;
+		same_catalog( true, $catalog->validate_selection( $systems, $map ), 'Canonical numeric strings and positive integers identify independent systems' );
+	} );
+
+	run_catalog_case( 'duplicate effective system numbers cannot split a package and components across arrays', function (): void {
+		$package = normalize_catalog_fixture( array( 'is_combo_product' => true ), ITEM_A );
+		$furnace = normalize_catalog_fixture( array(), ITEM_B );
+		$map = array( ITEM_A => $package, ITEM_B => $furnace );
+		$catalog = Equipment_Catalog::instance();
+		$systems = array(
+			array( 'system_number' => 1, 'equipment' => array( 'package' => array( 'item_id' => ITEM_A ) ) ),
+			array( 'system_number' => '1', 'equipment' => array( 'furnace' => array( 'item_id' => ITEM_B ) ) ),
+		);
+		catalog_error( $catalog->validate_selection( $systems, $map ), 'tc_estimate_bad_equipment_selection', 400 );
+		$systems[0]['system_number'] = 2;
+		unset( $systems[1]['system_number'] );
+		catalog_error( $catalog->validate_selection( $systems, $map ), 'tc_estimate_bad_equipment_selection', 400 );
+	} );
+
+	run_catalog_case( 'invalid numbering and non-list system containers fail closed', function (): void {
+		$package = normalize_catalog_fixture( array( 'is_combo_product' => true ), ITEM_A );
+		$map = array( ITEM_A => $package );
+		$catalog = Equipment_Catalog::instance();
+		$systems = selection_system( array( 'package' => array( 'item_id' => ITEM_A ) ) );
+		foreach ( array( 0, -1, 1.5, true, null, '', '01', '1x', array( 1 ) ) as $number ) {
+			$systems[0]['system_number'] = $number;
+			catalog_error( $catalog->validate_selection( $systems, $map ), 'tc_estimate_bad_equipment_selection', 400 );
+		}
+		$systems[0]['system_number'] = 1;
+		catalog_error( $catalog->validate_selection( array( 'first' => $systems[0] ), $map ), 'tc_estimate_bad_equipment_selection', 400 );
+		catalog_error( $catalog->validate_selection( array( 1 => $systems[0] ), $map ), 'tc_estimate_bad_equipment_selection', 400 );
+	} );
+
+	run_catalog_case( 'selection validator blocks conflicts, aliases, duplicate IDs and missing eligibility', function (): void {
+		$package = normalize_catalog_fixture( array( 'is_combo_product' => true ), ITEM_A );
+		$furnace = normalize_catalog_fixture( array(), ITEM_B );
+		$unknown = normalize_catalog_fixture( array( 'is_combo_product' => 'false' ), '90000000003' );
+		$thermostat = normalize_catalog_fixture( array( 'cf_equipment_type' => 'thermostat' ), '90000000004' );
+		$map = array_column( array( $package, $furnace, $unknown, $thermostat ), null, 'item_id' );
+		$catalog = Equipment_Catalog::instance();
+		foreach ( array(
+			array( 'package' => array( 'item_id' => ITEM_A ), 'furnace' => array( 'item_id' => ITEM_B ) ),
+			array( 'furnace' => array( 'item_id' => ITEM_A ) ),
+			array( 'other' => array( 'item_id' => ITEM_A ) ),
+			array( 'ac' => array( 'item_id' => ITEM_B ) ),
+			array( 'evaporator_coil' => array( 'item_id' => ITEM_B ) ),
+			array( 'arbitrary' => array( 'item_id' => ITEM_B ) ),
+			array( 'furnace' => array( 'item_id' => ITEM_B ), 'condenser' => array( 'item_id' => ITEM_B ) ),
+			array( 'furnace' => array( 'item_id' => $unknown['item_id'] ) ),
+			array( 'permit' => array( 'item_id' => $thermostat['item_id'] ) ),
+			array( 'furnace' => array( 'item_id' => '99999999999' ) ),
+		) as $equipment ) {
+			catalog_error( $catalog->validate_selection( selection_system( $equipment ), $map ), 'tc_estimate_bad_equipment_selection', 400 );
+		}
+		$map[ ITEM_B ]['for_estimate'] = false;
+		catalog_error( $catalog->validate_selection( selection_system( array( 'furnace' => array( 'item_id' => ITEM_B ) ) ), $map ), 'tc_estimate_bad_equipment_selection', 400 );
 	} );
 
 	echo "Catalog smoke: {$passed} cases passed, {$failed} failed; {$assertions} assertions passed.\n";

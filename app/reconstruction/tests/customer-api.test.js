@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCustomerChoicesApi,
   CustomerChoicesError,
+  safeCustomerChoicesLink,
 } from "../src/lib/customer-choices-api.js";
 
 const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
@@ -10,6 +11,8 @@ const selections = [
   { system_number: 1, choice_id: "20000000-0000-4000-8000-000000000001" },
 ];
 const restUrl = `${window.location.origin}/wp-json/tc-estimate/v1`;
+const otherPort = new URL(window.location.origin);
+otherPort.port = otherPort.port === "444" ? "445" : "444";
 function response(data, status = 200) {
   return new Response(JSON.stringify({ ok: true, data }), {
     status,
@@ -27,6 +30,45 @@ async function rejection(promise) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("customer selection link cache compatibility", () => {
+  it.each([
+    "/?tc_estimate_choices=1",
+    "/?tc_estimate_choices=1&ver=0.4.14",
+    "/subsite/?ver=999.999.999&tc_estimate_choices=1",
+  ])("keeps valid legacy and versioned link identity for %s", (path) => {
+    const link = `${window.location.origin}${path}#token=${token}`;
+    expect(safeCustomerChoicesLink(link)).toBe(link);
+  });
+
+  it.each([
+    "ver=",
+    "ver=0.4",
+    "ver=0.4.14.1",
+    "ver=0.4.14-beta",
+    "ver=1000.4.14",
+    "ver=0.4.14&ver=0.4.14",
+    "ver=0.4.14&redirect=elsewhere",
+    "ver=0.4.14&tc_estimate_choices=1",
+    `ver=0.4.14&token=${token}`,
+  ])("rejects malformed versions or extra query parameters: %s", (query) => {
+    expect(
+      safeCustomerChoicesLink(
+        `${window.location.origin}/?tc_estimate_choices=1&${query}#token=${token}`,
+      ),
+    ).toBe("");
+  });
+
+  it.each([
+    `https://other.example/?tc_estimate_choices=1&ver=0.4.14#token=${token}`,
+    `${window.location.origin.replace("://", "://user:pass@")}/?tc_estimate_choices=1&ver=0.4.14#token=${token}`,
+    `${otherPort.origin}/?tc_estimate_choices=1&ver=0.4.14#token=${token}`,
+    `${window.location.origin}/?tc_estimate_choices=1&ver=0.4.14#token=invalid`,
+    `${window.location.origin}/?tc_estimate_choices=1&ver=0.4.14#token=${token}&token=${token}`,
+  ])("retains URL and bearer-token safeguards for versioned links", (link) => {
+    expect(safeCustomerChoicesLink(link)).toBe("");
+  });
 });
 
 describe("public customer choice API", () => {

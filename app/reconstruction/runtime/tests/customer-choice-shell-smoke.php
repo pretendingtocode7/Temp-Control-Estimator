@@ -45,8 +45,12 @@ namespace {
 		'hook' => array(), 'unrelated_missing' => array(), 'unrelated_other' => array( 'tc_estimate_choices' => '2' ),
 		'unrelated_array' => array( 'tc_estimate_choices' => array( '1' ) ), 'unrelated_integer' => array( 'tc_estimate_choices' => 1 ), 'unrelated_suffix' => array( 'tc_estimate_choices' => '1junk' ),
 	);
+	foreach ( array( 'changed_js_bytes', 'changed_css_bytes', 'hash_wrong_length', 'css_missing_bundle', 'css_unreadable_bundle', 'css_hash_failure', 'css_hash_throw', 'css_hash_wrong_length' ) as $ccs_extra_case ) {
+		$ccs_queries[ $ccs_extra_case ] = array( 'tc_estimate_choices' => '1' );
+		if ( str_starts_with( $ccs_extra_case, 'css_' ) ) { $ccs_queries[ $ccs_extra_case . '_head' ] = array( 'tc_estimate_choices' => '1' ); }
+	}
 	$_GET = $ccs_queries[ $GLOBALS['ccs_case'] ] ?? array();
-	$_SERVER['REQUEST_METHOD'] = in_array( $GLOBALS['ccs_case'], array( 'head', 'missing_bundle_head' ), true ) ? 'HEAD' : ( 'post' === $GLOBALS['ccs_case'] ? 'POST' : 'GET' );
+	$_SERVER['REQUEST_METHOD'] = ( 'head' === $GLOBALS['ccs_case'] || str_ends_with( $GLOBALS['ccs_case'], '_head' ) ) ? 'HEAD' : ( 'post' === $GLOBALS['ccs_case'] ? 'POST' : 'GET' );
 	ob_start();
 	register_shutdown_function( static function (): void {
 		$body = ob_get_contents(); if ( false !== $body ) { ob_end_clean(); }
@@ -63,8 +67,19 @@ namespace TempControl\Estimate\PublicSite {
 	}
 	function header_remove( ?string $name = null ): void { if ( null === $name ) { throw new \LogicException( 'Customer shell must not remove unrelated headers.' ); } unset( $GLOBALS['ccs_headers'][ strtolower( $name ) ] ); }
 	function headers_sent( ?string &$filename = null, ?int &$line = null ): bool { return false; }
-	function is_readable( string $path ): bool { return 'unreadable_bundle' !== $GLOBALS['ccs_case'] && \is_readable( $path ); }
-	function hash_file( string $algorithm, string $path, bool $binary = false ): string|false { if ( 'hash_throw' === $GLOBALS['ccs_case'] ) { throw new \RuntimeException( 'Synthetic hashing failure.' ); } return 'hash_failure' === $GLOBALS['ccs_case'] ? false : \hash_file( $algorithm, $path, $binary ); }
+	function fixture_case(): string { return str_ends_with( $GLOBALS['ccs_case'], '_head' ) ? substr( $GLOBALS['ccs_case'], 0, -5 ) : $GLOBALS['ccs_case']; }
+	function is_readable( string $path ): bool {
+		$case = fixture_case(); $css = str_ends_with( $path, 'estimate-builder.css' );
+		if ( ( ! $css && 'unreadable_bundle' === $case ) || ( $css && 'css_unreadable_bundle' === $case ) ) { return false; }
+		return \is_readable( $path );
+	}
+	function hash_file( string $algorithm, string $path, bool $binary = false ): string|false {
+		$case = fixture_case(); $css = str_ends_with( $path, 'estimate-builder.css' ); $prefix = $css ? 'css_' : '';
+		if ( $prefix . 'hash_throw' === $case ) { throw new \RuntimeException( 'Synthetic hashing failure.' ); }
+		if ( $prefix . 'hash_failure' === $case ) { return false; }
+		if ( $prefix . 'hash_wrong_length' === $case ) { return str_repeat( 'x', $css ? 31 : 47 ); }
+		return \hash_file( $algorithm, $path, $binary );
+	}
 }
 
 namespace {

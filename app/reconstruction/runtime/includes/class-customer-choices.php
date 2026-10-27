@@ -357,7 +357,7 @@ final class Customer_Choices {
 	}
 	private function record_allowed( array $r ): bool { return isset( $r['id'], $r['owner_id'], $r['org_id'], $r['estimate_id'], $r['expires_at'], $r['source_hash'], $r['signature_hash'] ) && empty( $r['revoked'] ) && (int) $r['expires_at'] > time() && hash_equals( (string) $r['org_id'], $this->org() ) && $this->owner_allowed( (int) $r['owner_id'] ); }
 	private function signature( array $r ): string { return hash_hmac( 'sha256', implode( '|', array( 'tc-estimate-choices-v1', $r['id'], $r['owner_id'], $r['org_id'], $r['estimate_id'], $r['expires_at'], $r['source_hash'] ) ), wp_salt( 'auth' ) ); }
-	private function link_response( array $r ): array { return array( 'available' => true, 'url' => home_url( '/?tc_estimate_choices=1' ) . '#token=' . $r['id'] . '.' . $this->signature( $r ), 'expires_at' => (int) $r['expires_at'], 'revision' => (int) $r['revision'] ); }
+	private function link_response( array $r ): array { return array( 'available' => true, 'url' => home_url( '/?tc_estimate_choices=1&ver=' . rawurlencode( TC_ESTIMATE_VERSION ) ) . '#token=' . $r['id'] . '.' . $this->signature( $r ), 'expires_at' => (int) $r['expires_at'], 'revision' => (int) $r['revision'] ); }
 	private function owner_allowed( int $owner ): bool { return $owner > 0 && get_userdata( $owner ) && ( user_can( $owner, TC_ESTIMATE_CAP ) || user_can( $owner, 'manage_options' ) ); }
 	private function org(): string { $org = trim( (string) get_option( 'tc_estimate_zoho_org_id', '' ) ); return preg_match( '/^[0-9]{5,20}$/D', $org ) ? $org : ''; }
 	private function valid_id( string $id ): bool { return 1 === preg_match( '/^[0-9]{15,20}$/D', $id ); }

@@ -117,6 +117,34 @@ describe("staff customer selection links", () => {
     ).toBeNull();
     expect(api.sendEstimate).not.toHaveBeenCalled();
   });
+  it("preserves a versioned customer link in staff copy and open controls", async () => {
+    const versionedLink = link.replace("#token=", "&ver=0.4.14#token=");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const api = {
+      createCustomerChoiceLink: vi
+        .fn()
+        .mockResolvedValue({ available: true, url: versionedLink }),
+      sendEstimate: vi.fn(),
+    };
+    renderSuccess(api);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create customer selection link" }),
+    );
+    const input = await screen.findByRole("textbox", {
+      name: "Customer selection link",
+    });
+    expect(input.value).toBe(versionedLink);
+    expect(
+      screen.getByRole("link", { name: "Open package choices" }).href,
+    ).toBe(versionedLink);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy customer selection link" }),
+    );
+    await screen.findByText("Customer selection link copied.");
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(versionedLink);
+    expect(api.sendEstimate).not.toHaveBeenCalled();
+  });
   it.each([
     "javascript:alert(1)",
     `https://other.example/?tc_estimate_choices=1#token=${token}`,

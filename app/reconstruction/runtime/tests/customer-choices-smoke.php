@@ -303,12 +303,24 @@ namespace {
 		cc_reset(); $link = cc_link(); $token = cc_token( $link );
 		cc_check( preg_match( '/^[a-f0-9]{32}\.[a-f0-9]{64}$/D', $token ) === 1, 'Scoped high-entropy token shape.' );
 		cc_same( 'https://fixture.example.test', preg_replace( '~(/\?.*)$~', '', $link['url'] ), 'Configured site origin is used.' );
+		$query = array(); parse_str( (string) parse_url( $link['url'], PHP_URL_QUERY ), $query );
+		cc_same( array( 'tc_estimate_choices' => '1', 'ver' => TC_ESTIMATE_VERSION ), $query, 'Cache compatibility query contains only the route marker and current plugin version.' );
+		cc_same( 'token=' . $token, (string) parse_url( $link['url'], PHP_URL_FRAGMENT ), 'Scoped credential remains entirely in the fragment.' );
 		cc_check( ! str_contains( (string) parse_url( $link['url'], PHP_URL_QUERY ), $token ), 'Bearer token is not in query/loggable URL.' );
+		foreach ( array( 'estimate_id', 'customer_id', 'owner_id', 'signature', 'token' ) as $private_query_field ) { cc_check( ! array_key_exists( $private_query_field, $query ), 'Versioned query excludes private authority field ' . $private_query_field ); }
 		$record = $GLOBALS['cc_options'][ cc_record_key() ];
 		cc_check( $record['expires_at'] > time() && $record['expires_at'] <= time() + 30 * DAY_IN_SECONDS, 'Link expiry is bounded.' );
 		cc_check( ! str_contains( (string) json_encode( $record ), $token ), 'Raw bearer token is not persisted.' );
 		cc_same( 0, count( cc_writes() ), 'Link preparation does not update Books.' );
 	});
+	cc_case( 'Retrieving the same staff link preserves version query token expiry and revision without writes', function (): void {
+		cc_reset(); $first = cc_link(); $record = $GLOBALS['cc_options'][ cc_record_key() ]; $count = count( $GLOBALS['cc_options'] );
+		$second = cc_link(); cc_same( $first, $second, 'Unchanged owned quote returns the same complete versioned link.' );
+		cc_same( cc_token( $first ), cc_token( $second ), 'Cache version does not rotate the scoped credential.' ); cc_same( $record, $GLOBALS['cc_options'][ cc_record_key() ], 'Link retrieval preserves quoted prices pending state signature and TTL.' ); cc_same( $count, count( $GLOBALS['cc_options'] ), 'Link retrieval creates no second record.' );
+		$query = array(); parse_str( (string) parse_url( $second['url'], PHP_URL_QUERY ), $query ); cc_same( TC_ESTIMATE_VERSION, $query['ver'] ?? null, 'Reused link carries current version marker.' );
+		cc_same( 0, count( cc_writes() ), 'No Books update while retrieving link.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No CRM update while retrieving link.' );
+	});
+
 	cc_case( 'Public view exposes only customer quote choices and has no approval URL before confirmation', function (): void {
 		cc_reset(); $token = cc_token( cc_link() ); $key = cc_record_key(); $before = $GLOBALS['cc_options'][ $key ];
 		$view = Customer_Choices::instance()->view( $token ); cc_check( is_array( $view ), 'Valid link gives a public view.' );

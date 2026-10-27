@@ -46,14 +46,18 @@ export function readCustomerChoiceToken(fragment = window.location.hash) {
 export function safeCustomerChoicesLink(value) {
   try {
     const url = new URL(value, window.location.origin);
+    const versions = url.searchParams.getAll("ver");
     if (
       url.origin !== window.location.origin ||
       url.username ||
       url.password ||
       url.searchParams.getAll("tc_estimate_choices").length !== 1 ||
       url.searchParams.get("tc_estimate_choices") !== "1" ||
+      versions.length > 1 ||
+      (versions.length === 1 &&
+        !/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/.test(versions[0])) ||
       [...url.searchParams.keys()].some(
-        (key) => key !== "tc_estimate_choices",
+        (key) => key !== "tc_estimate_choices" && key !== "ver",
       ) ||
       !readCustomerChoiceToken(url.hash)
     )

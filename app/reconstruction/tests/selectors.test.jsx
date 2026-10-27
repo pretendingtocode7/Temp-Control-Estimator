@@ -55,7 +55,12 @@ function equipmentResponse(items, overrides = {}) {
     page: 1,
     per_page: 50,
     has_more: false,
-    facets: { btus: [80000, 100000], tons: [1.5, 2], efficiencies: [85, 95] },
+    facets: {
+      category2: ["Silver", "Gold & High-Efficiency / 2-stage"],
+      btus: [80000, 100000],
+      tons: [1.5, 2],
+      efficiencies: [85, 95],
+    },
     ...overrides,
   };
 }
@@ -71,6 +76,7 @@ function packageItem(overrides = {}) {
   return {
     item_id: "10000000001",
     selection_category: "package",
+    category_2: "Silver",
     name: "Fixture 1.5 ton 100000 BTU Package",
     is_composite: true,
     tons: 1.5,
@@ -267,6 +273,7 @@ describe("unified equipment picker", () => {
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
       category: "package",
+      category2: "",
       q: "furnace",
       btu: "",
       tons: "",
@@ -319,7 +326,12 @@ describe("unified equipment picker", () => {
     const api = {
       searchEquipmentSelector: vi.fn().mockResolvedValue(
         equipmentResponse([item], {
-          facets: { btus: [100000], tons: [1.5], efficiencies: [95] },
+          facets: {
+            category2: ["Silver"],
+            btus: [100000],
+            tons: [1.5],
+            efficiencies: [95],
+          },
         }),
       ),
     };
@@ -334,6 +346,7 @@ describe("unified equipment picker", () => {
     ).toBe("true");
     expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
       category: "package",
+      category2: "",
       q: "",
       btu: "",
       tons: "",
@@ -382,15 +395,26 @@ describe("unified equipment picker", () => {
     catalog[150] = packageItem({
       item_id: "10000000999",
       name: "Distant catalog match",
+      category_2: "Gold & High-Efficiency / 2-stage",
       tons: 1.5,
       btu_input: 100000,
     });
     const api = {
       searchEquipmentSelector: vi.fn(
-        async ({ category, q, btu, tons, efficiency, page, limit }) => {
+        async ({
+          category,
+          category2,
+          q,
+          btu,
+          tons,
+          efficiency,
+          page,
+          limit,
+        }) => {
           const matches = catalog.filter(
             (item) =>
               item.selection_category === category &&
+              (!category2 || item.category_2 === category2) &&
               (!q || item.name.toLowerCase().includes(q.toLowerCase())) &&
               (!btu || item.btu_input === Number(btu)) &&
               (!tons || item.tons === Number(tons)) &&
@@ -427,8 +451,13 @@ describe("unified equipment picker", () => {
       target: { value: "95" },
     });
     await screen.findByText("Distant catalog match");
+    fireEvent.change(screen.getByRole("combobox", { name: /^Category ?2$/ }), {
+      target: { value: "Gold & High-Efficiency / 2-stage" },
+    });
+    await screen.findByText("Distant catalog match");
     expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
       category: "package",
+      category2: "Gold & High-Efficiency / 2-stage",
       q: "Distant",
       btu: "100000",
       tons: "1.5",
@@ -490,8 +519,19 @@ describe("unified equipment picker", () => {
         "95",
       ),
     );
+    fireEvent.change(screen.getByRole("combobox", { name: /^Category ?2$/ }), {
+      target: { value: "Silver" },
+    });
+    await waitFor(() =>
+      expect(api.searchEquipmentSelector.mock.lastCall[0].category2).toBe(
+        "Silver",
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "AC", exact: true }));
     await screen.findByText("ac page 1");
+    expect(screen.getByRole("combobox", { name: /^Category ?2$/ }).value).toBe(
+      "",
+    );
     expect(screen.getByRole("combobox", { name: "BTU" }).value).toBe("");
     expect(screen.getByRole("combobox", { name: "Tonnage" }).value).toBe("");
     expect(screen.getByRole("combobox", { name: "Efficiency (%)" }).value).toBe(
@@ -499,6 +539,7 @@ describe("unified equipment picker", () => {
     );
     expect(api.searchEquipmentSelector).toHaveBeenLastCalledWith({
       category: "ac",
+      category2: "",
       q: "",
       btu: "",
       tons: "",
@@ -558,7 +599,7 @@ describe("unified equipment picker", () => {
     await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(newer));
   });
 
-  it.each(["BTU", "Tonnage", "Efficiency (%)", "category"])(
+  it.each(["BTU", "Tonnage", "Efficiency (%)", "Category2", "category"])(
     "clears selectable results immediately when %s changes",
     async (control) => {
       const first = packageItem({ name: "Previously selectable package" });
@@ -578,16 +619,23 @@ describe("unified equipment picker", () => {
           screen.getByRole("button", { name: "Coil", exact: true }),
         );
       else
-        fireEvent.change(screen.getByRole("combobox", { name: control }), {
-          target: {
-            value:
-              control === "BTU"
-                ? "100000"
-                : control === "Tonnage"
-                  ? "1.5"
-                  : "95",
+        fireEvent.change(
+          screen.getByRole("combobox", {
+            name: control === "Category2" ? /^Category ?2$/ : control,
+          }),
+          {
+            target: {
+              value:
+                control === "BTU"
+                  ? "100000"
+                  : control === "Tonnage"
+                    ? "1.5"
+                    : control === "Efficiency (%)"
+                      ? "95"
+                      : "Silver",
+            },
           },
-        });
+        );
       expect(screen.queryByText(first.name)).toBeNull();
       fireEvent.click(oldButton);
       expect(onPick).not.toHaveBeenCalled();
@@ -633,7 +681,7 @@ describe("unified equipment picker", () => {
     const api = {
       searchEquipmentSelector: vi.fn().mockResolvedValue(
         equipmentResponse([], {
-          facets: { btus: [], tons: [], efficiencies: [] },
+          facets: { category2: [], btus: [], tons: [], efficiencies: [] },
         }),
       ),
     };
@@ -652,6 +700,11 @@ describe("unified equipment picker", () => {
           .getAllByRole("option")
           .map((option) => option.value),
       ).toEqual([""]);
+    expect(
+      within(screen.getByRole("combobox", { name: /^Category ?2$/ }))
+        .getAllByRole("option")
+        .map((option) => option.value),
+    ).toEqual([""]);
     expect(screen.queryByRole("button", { name: /Unnamed part/ })).toBeNull();
   });
 
@@ -666,7 +719,12 @@ describe("unified equipment picker", () => {
     const api = {
       searchEquipmentSelector: vi.fn().mockResolvedValue(
         equipmentResponse([item], {
-          facets: { btus: [100000], tons: [1.5], efficiencies: [] },
+          facets: {
+            category2: [],
+            btus: [100000],
+            tons: [1.5],
+            efficiencies: [],
+          },
         }),
       ),
     };
@@ -806,6 +864,7 @@ describe("system slots and item edits", () => {
     await screen.findByText(replacement.name);
     expect(api.searchEquipmentSelector).toHaveBeenCalledExactlyOnceWith({
       category: "furnace",
+      category2: "",
       q: "",
       btu: "",
       tons: "",
@@ -863,6 +922,7 @@ describe("system slots and item edits", () => {
     await waitFor(() =>
       expect(api.searchEquipmentSelector).toHaveBeenCalledWith({
         category: "package",
+        category2: "",
         q: "",
         btu: "",
         tons: "",
@@ -1117,14 +1177,13 @@ describe("system slots and item edits", () => {
     expect(screen.getByRole("textbox", { name: "System 1 label" }).value).toBe(
       "Second System",
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "+ Add another system" }),
-    );
-    expect(onChange.mock.lastCall[0][1]).toEqual({
+    fireEvent.click(screen.getByRole("button", { name: "Add another system" }));
+    expect(onChange.mock.lastCall[0][1]).toMatchObject({
       system_number: 2,
-      system_label: "Second Floor System",
+      system_label: "System 2",
       equipment: {},
     });
+    expect(onChange.mock.lastCall[0][1].system_id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(screen.getAllByText("Permit").length).toBeGreaterThan(0);
   });
 });
@@ -1190,17 +1249,17 @@ describe("manual pricing", () => {
     const total = screen.getByRole("spinbutton", { name: /^Project total/ });
     expect(cost.value).toBe("");
     expect(total.value).toBe("150");
-    expect(screen.getByRole("status").textContent).toMatch(
+    expect(screen.getByText(/Purchase cost is missing/).textContent).toMatch(
       /Purchase cost is missing for 2 selected items.*Enter the equipment cost manually\./,
     );
-    expect(screen.getByRole("status").textContent).not.toContain(
-      "manual override",
-    );
+    expect(
+      screen.getByText(/Purchase cost is missing/).textContent,
+    ).not.toContain("manual override");
     fireEvent.change(cost, { target: { value: "0" } });
     expect(onPricingChange).toHaveBeenLastCalledWith({ equipment_cost: 0 });
     expect(cost.value).toBe("0");
     expect(total.value).toBe("150");
-    expect(screen.getByRole("status").textContent).toContain(
+    expect(screen.getByText(/Purchase cost is missing/).textContent).toContain(
       "The amount above is a manual override.",
     );
   });

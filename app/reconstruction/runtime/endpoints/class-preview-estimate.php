@@ -5,7 +5,7 @@
  * Renders a template against a payload and returns the rendered HTML. Does NOT call Zoho to create anything.
  *
  * This is the Phase 1 success gate — office staff can prove template language works end to end by
- * POSTing a Brian Balson style payload and getting a correctly rendered proposal body back.
+ * POSTing a synthetic payload and getting a correctly rendered proposal body back.
  *
  * @package TempControlEstimateBuilder
  */
@@ -17,6 +17,7 @@ namespace TempControl\Estimate\Endpoints;
 use TempControl\Estimate\Customer_Search;
 use TempControl\Estimate\Equipment_Catalog;
 use TempControl\Estimate\Estimate_Generator;
+use TempControl\Estimate\Proposal_Choices;
 use TempControl\Estimate\Rate_Limiter;
 use TempControl\Estimate\Security;
 use TempControl\Estimate\Template_CPT;
@@ -26,6 +27,8 @@ use WP_Error;
 use WP_REST_Request;
 
 defined( 'ABSPATH' ) || exit;
+
+require_once dirname( __DIR__ ) . '/includes/class-proposal-choices.php';
 
 final class Preview_Estimate extends Endpoint_Base {
 
@@ -53,6 +56,10 @@ final class Preview_Estimate extends Endpoint_Base {
 		}
 
 		$body = $this->body( $request );
+		if ( is_wp_error( $body ) ) {
+			return $this->fail( $body );
+		}
+		$body = Proposal_Choices::instance()->normalize( $body );
 		if ( is_wp_error( $body ) ) {
 			return $this->fail( $body );
 		}
@@ -92,11 +99,7 @@ final class Preview_Estimate extends Endpoint_Base {
 		}
 
 		// --- Build the catalog lookup for every referenced item_id ---
-		$systems = $body['systems'] ?? array();
-		if ( ! is_array( $systems ) ) {
-			return $this->fail( new WP_Error( 'tc_estimate_bad_equipment_selection', __( 'Equipment selections are invalid.', 'tc-estimate' ), array( 'status' => 400 ) ) );
-		}
-		$item_ids = $this->collect_item_ids( $systems );
+		$item_ids = Proposal_Choices::instance()->collect_item_ids( $body );
 		$catalog_by_id = array();
 		foreach ( $item_ids as $id ) {
 			$item = Equipment_Catalog::instance()->get_item( $id );
@@ -110,10 +113,10 @@ final class Preview_Estimate extends Endpoint_Base {
 			$catalog_by_id[ $id ] = $item;
 		}
 
-		// Validate the fresh catalog identities before rendering or pricing a selection.
-		$selection = Equipment_Catalog::instance()->validate_selection( $systems, $catalog_by_id );
-		if ( is_wp_error( $selection ) ) {
-			return $this->fail( $selection );
+		// Validate all offered choices, resolve selected-only pricing and add-ons.
+		$body = Proposal_Choices::instance()->project( $body, $catalog_by_id );
+		if ( is_wp_error( $body ) ) {
+			return $this->fail( $body );
 		}
 
 		// --- Build view + render ---
@@ -138,27 +141,4 @@ final class Preview_Estimate extends Endpoint_Base {
 		) );
 	}
 
-	/**
-	 * Walk the systems array and pull out every item_id.
-	 *
-	 * @param mixed $systems
-	 * @return string[]
-	 */
-	private function collect_item_ids( mixed $systems ): array {
-		if ( ! is_array( $systems ) ) {
-			return array();
-		}
-		$ids = array();
-		foreach ( $systems as $sys ) {
-			if ( ! is_array( $sys ) || empty( $sys['equipment'] ) || ! is_array( $sys['equipment'] ) ) {
-				continue;
-			}
-			foreach ( $sys['equipment'] as $slot ) {
-				if ( is_array( $slot ) && ! empty( $slot['item_id'] ) ) {
-					$ids[] = (string) $slot['item_id'];
-				}
-			}
-		}
-		return array_values( array_unique( $ids ) );
-	}
 }

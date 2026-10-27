@@ -50,8 +50,20 @@ final class Token_Renderer {
 			// The bundled fallback accepts compact identifier tokens. Normalize only
 			// their whitespace on this render copy; saved template posts stay intact.
 			$template_body = (string) preg_replace( '/\{\{(\{?)\s*([#^\/]?)\s*([a-zA-Z0-9_.]+)\s*(\}?)\}\}/', '{{$1$2$3$4}}', $template_body );
-			$template_body = $this->prepare_document_template( $template_body );
-			$rendered = $engine->render( $template_body, $view );
+			$template_body = $this->prepare_document_template( $template_body, $view );
+			$render_view = $view;
+			if ( ! empty( $view['has_proposal_choices'] ) && ! $this->template_has_proposal_choices_support( $template_body ) ) {
+				// Unsupported layouts get one explicit alternatives section instead of
+				// a selected-equipment copy plus a second, conflicting options list.
+				$render_view['systems'] = array();
+				$render_view['proposal_systems'] = array();
+			}
+			foreach ( array( 'maintenance', 'permits' ) as $key ) {
+				if ( ! $this->template_has_addon_support( $template_body, $key ) ) {
+					unset( $render_view['proposal_addons'][ $key ] );
+				}
+			}
+			$rendered = $engine->render( $template_body, $render_view );
 			return $this->append_compatibility_sections( $rendered, $template_body, $view );
 		} catch ( \Throwable $e ) {
 			return new WP_Error(
@@ -79,20 +91,43 @@ final class Token_Renderer {
 			return $value;
 		};
 		$view['systems'] = $strip_financial_fields( (array) ( $view['systems'] ?? array() ) );
+		foreach ( (array) ( $view['proposal_systems'] ?? array() ) as $system_index => $system ) {
+			$view['proposal_systems'][ $system_index ] = array_intersect_key( $system, array_flip( array( 'system_number', 'system_label', 'selected_choice_id', 'choices' ) ) );
+			foreach ( (array) ( $system['choices'] ?? array() ) as $choice_index => $choice ) {
+				// The explicit installed sales price belongs to the option, never to
+				// its equipment rows. All internal catalog financials remain hidden.
+				$view['proposal_systems'][ $system_index ]['choices'][ $choice_index ] = array_intersect_key( $choice, array_flip( array( 'choice_id', 'label', 'sales_price', 'sales_price_formatted', 'is_selected', 'items' ) ) );
+				$view['proposal_systems'][ $system_index ]['choices'][ $choice_index ]['items'] = $strip_financial_fields( (array) ( $choice['items'] ?? array() ) );
+			}
+		}
+		$view['proposal_addons'] = $this->build_proposal_addon_views( (array) ( $view['proposal_addons'] ?? array() ) );
 		// A proposal summarizes the project sale and its deposit, never the tool's
 		// internal equipment subtotal. Rebates retain their existing separate view.
 		$view['pricing'] = array_intersect_key( (array) ( $view['pricing'] ?? array() ), array_flip( array(
 			'total', 'total_formatted', 'deposit_percent', 'deposit_amount', 'deposit_amount_formatted',
+			'project_adjustment', 'project_adjustment_formatted', 'has_project_adjustment',
 		) ) );
 		return $view;
 	}
 
 	/** Adapt the verified legacy token layout on a copy, without editing stored posts. */
-	private function prepare_document_template( string $template_body ): string {
+	private function prepare_document_template( string $template_body, array $view = array() ): string {
 		// This exact sales-subtotal row occurs in both inspected live templates and
 		// the seed layout. The customer summary keeps total and deposit only.
 		$subtotal_row = '<tr><td style="padding:6px 0;">Subtotal</td><td style="text-align:right;">{{pricing.subtotal_formatted}}</td></tr>';
 		$template_body = str_replace( $subtotal_row, '', $template_body );
+		// Both inspected live templates use this exact unconditional warranty
+		// section. Add conditions on this render copy, keeping custom layouts and
+		// stored posts untouched and preserving positive warranty year values.
+		$legacy_warranty = '<h3>Warranty</h3>' . "\n<ul>\n  "
+			. '<li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty</li>' . "\n  "
+			. '<li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>' . "\n</ul>";
+		$conditional_warranty = '{{#warranty.has_any}}<h3>Warranty</h3>' . "\n<ul>\n  "
+			. '{{#warranty.has_parts}}<li>{{warranty.parts_years}}-Year Manufacturer Parts Warranty</li>{{/warranty.has_parts}}' . "\n  "
+			. '{{#warranty.has_labor}}<li>{{warranty.labor_years}}-Year Labor Warranty (requires active Temp Control maintenance plan)</li>{{/warranty.has_labor}}' . "\n</ul>{{/warranty.has_any}}";
+		foreach ( array( "\n", "\r\n" ) as $line_ending ) {
+			$template_body = str_replace( str_replace( "\n", $line_ending, $legacy_warranty ), str_replace( "\n", $line_ending, $conditional_warranty ), $template_body );
+		}
 		// Avoid leaving the seed template's price-only permit separator behind.
 		$template_body = str_replace( '{{#is_permit}} — {{rate_formatted}}{{/is_permit}}', '', $template_body );
 		// The verified legacy condenser row closes a parenthesis even when SEER is
@@ -100,6 +135,25 @@ final class Token_Renderer {
 		$legacy_specs = '{{#seer}} ({{seer}} SEER{{/seer}}{{#tons}}, {{tons}} ton{{/tons}}{{#refrigerant}}, {{refrigerant}}{{/refrigerant}})';
 		$balanced_specs = '{{#seer}} ({{seer}} SEER){{/seer}}{{#tons}} — {{tons}} ton{{/tons}}{{#refrigerant}} — {{refrigerant}}{{/refrigerant}}';
 		$template_body = (string) preg_replace_callback( '/\{\{#condenser\}\}(.*?)\{\{\/condenser\}\}/s', static fn ( array $match ): string => str_replace( $legacy_specs, $balanced_specs, $match[0] ), $template_body );
+		if ( isset( $view['proposal_addons']['permits'] ) ) {
+			$template_body = str_replace( ' and do not include any required permits beyond those standard for NJ residential HVAC work', '', $template_body );
+		}
+		if ( ! empty( $view['has_proposal_choices'] ) ) {
+			if ( $this->template_has_proposal_choices_support( $template_body ) ) {
+				return $template_body;
+			}
+			// Replace only a single self-contained equipment loop. The inspected
+			// legacy templates put their heading/list inside this systems block.
+			preg_match_all( '/\{\{#systems\}\}(.*?)\{\{\/systems\}\}/s', $template_body, $blocks, PREG_SET_ORDER );
+			$equipment_blocks = array_values( array_filter( $blocks, static fn ( array $block ): bool =>
+				str_contains( $block[1], '<h4' ) && str_contains( $block[1], '<ul' ) &&
+				1 === preg_match( '/\{\{#(?:items|package|furnace|condenser|coil|has_other|other)\}\}/', $block[1] )
+			) );
+			if ( 1 === count( $equipment_blocks ) ) {
+				return str_replace( $equipment_blocks[0][0], $this->proposal_choices_template(), $template_body );
+			}
+			return $template_body;
+		}
 		if ( $this->template_has_package_support( $template_body ) ) {
 			return $template_body;
 		}
@@ -121,10 +175,16 @@ final class Token_Renderer {
 	 */
 	private function append_compatibility_sections( string $rendered, string $template_body, array $view ): string {
 		$sections = array();
+		if ( ! empty( $view['has_proposal_choices'] ) && ! $this->template_has_proposal_choices_support( $template_body ) ) {
+			$engine = $this->get_engine();
+			if ( null !== $engine ) {
+				$sections[] = '<h3>Equipment Options by System</h3>' . $engine->render( $this->proposal_choices_template(), $view );
+			}
+		}
 
 		// Package is a known slot, so legacy #other loops no longer include it.
 		// Only an explicit package reference or generic items loop renders it.
-		if ( ! $this->template_has_package_support( $template_body ) ) {
+		if ( empty( $view['has_proposal_choices'] ) && ! $this->template_has_package_support( $template_body ) ) {
 			$package_items = array();
 			foreach ( (array) ( $view['systems'] ?? array() ) as $system ) {
 				if ( ! is_array( $system ) || empty( $system['package'] ) || ! is_array( $system['package'] ) ) {
@@ -159,7 +219,7 @@ final class Token_Renderer {
 			}
 		}
 
-		if ( ! str_contains( $template_body, '{{#permit}}' ) && ! str_contains( $template_body, '{{#items}}' ) ) {
+		if ( empty( $view['has_proposal_choices'] ) && ! isset( $view['proposal_addons']['permits'] ) && ! str_contains( $template_body, '{{#permit}}' ) && ! str_contains( $template_body, '{{#items}}' ) ) {
 			$permit_items = array();
 			foreach ( (array) ( $view['systems'] ?? array() ) as $system ) {
 				if ( ! is_array( $system ) || empty( $system['permit'] ) || ! is_array( $system['permit'] ) ) {
@@ -179,7 +239,76 @@ final class Token_Renderer {
 			}
 		}
 
+		$addon_sections = $this->proposal_addon_sections( $view, $template_body );
+		if ( '' !== $addon_sections ) {
+			if ( 1 === substr_count( $rendered, '<h3>Investment</h3>' ) ) {
+				$rendered = str_replace( '<h3>Investment</h3>', $addon_sections . "\n<h3>Investment</h3>", $rendered );
+			} else {
+				$sections[] = $addon_sections;
+			}
+		}
+		if ( ! empty( $view['has_proposal_choices'] ) && ! empty( $view['pricing']['has_project_adjustment'] ) && ! str_contains( $template_body, 'pricing.project_adjustment_formatted' ) ) {
+			$adjustment = '<p><strong>Project adjustment: ' . esc_html( (string) $view['pricing']['project_adjustment_formatted'] ) . '</strong> — applies once to the selected project.</p>';
+			if ( 1 === substr_count( $rendered, '<h3>Investment</h3>' ) ) {
+				$rendered = str_replace( '<h3>Investment</h3>', '<h3>Investment</h3>' . "\n" . $adjustment, $rendered );
+			} else {
+				$sections[] = $adjustment;
+			}
+		}
 		return empty( $sections ) ? $rendered : $rendered . "\n" . implode( "\n", $sections );
+	}
+
+	/** Customer option totals are deliberately distinct from equipment unit prices. */
+	private function proposal_choices_template(): string {
+		return '<p>The project total includes only the marked selection for each system.</p>{{#proposal_systems}}<section class="tc-proposal-system"><h4 style="color:#214c7a;margin-bottom:4px;">{{system_label}}</h4>'
+			. '{{#choices}}<div class="tc-proposal-choice" style="margin:10px 0;padding:10px;border:1px solid #d1d5db;">'
+			. '<p style="margin:0 0 6px;"><strong>{{label}}</strong>{{#is_selected}} — Selected for project total{{/is_selected}}</p>'
+			. '<ul style="margin:4px 0;">{{#items}}<li>{{display_name}}{{#short_description}} — {{short_description}}{{/short_description}}</li>{{/items}}</ul>'
+			. '<p style="margin:6px 0 0;"><strong>Option price: {{sales_price_formatted}}</strong></p></div>{{/choices}}</section>{{/proposal_systems}}';
+	}
+
+	private function template_has_proposal_choices_support( string $template_body ): bool {
+		$template_body = (string) preg_replace( '/<!--[\s\S]*?-->/', '', $template_body );
+		if ( preg_match_all( '/\{\{#proposal_systems\}\}(.*?)\{\{\/proposal_systems\}\}/s', $template_body, $systems ) ) {
+			foreach ( $systems[1] as $system ) {
+				if ( 1 === preg_match( '/\{\{#choices\}\}(.*?)\{\{\/choices\}\}/s', $system, $choice ) &&
+					1 === preg_match( '/\{\{#items\}\}.*?\{\{\/items\}\}/s', $choice[1] ) &&
+					1 === preg_match( '/\{\{sales_price(?:_formatted)?\}\}/', $choice[1] ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private function template_has_addon_support( string $template_body, string $key ): bool {
+		$template_body = (string) preg_replace( '/<!--[\s\S]*?-->/', '', $template_body );
+		$token = preg_quote( 'proposal_addons.' . $key, '/' );
+		return 1 === preg_match( '/\{\{#' . $token . '\}\}(.*?)\{\{\/' . $token . '\}\}/s', $template_body, $section ) &&
+			str_contains( $section[1], '{{name}}' ) && str_contains( $section[1], '{{description}}' ) &&
+			1 === preg_match( '/\{\{rate(?:_formatted)?\}\}/', $section[1] );
+	}
+
+	private function proposal_addon_sections( array $view, string $template_body ): string {
+		$parts = array();
+		if ( isset( $view['proposal_addons']['maintenance'] ) && ! $this->template_has_addon_support( $template_body, 'maintenance' ) ) {
+			$parts[] = '<h3>New Residential System Maintenance Agreement</h3><p>Included: <strong>$0.00</strong></p><p>Renews at $349 for one unit.</p>';
+		}
+		if ( isset( $view['proposal_addons']['permits'] ) && ! $this->template_has_addon_support( $template_body, 'permits' ) ) {
+			$parts[] = '<h3>Permits &amp; Inspections</h3><p>Included: <strong>$0.00</strong></p>';
+			foreach ( $this->permit_paragraphs() as $paragraph ) {
+				$parts[] = '<p>' . esc_html( $paragraph ) . '</p>';
+			}
+		}
+		return implode( "\n", $parts );
+	}
+
+	private function permit_paragraphs(): array {
+		return array(
+			'Permit fees are not included in the project total.',
+			'Temp Control will prepare and complete all required permit paperwork and submit the necessary documentation to the local township on the homeowner’s behalf.',
+			'All work will be performed in accordance with local building codes and manufacturer specifications. Permit payment, pickup and scheduling of Inspections are the responsibility of the homeowner.',
+		);
 	}
 
 	/** Recognize positive equipment tokens, not prose, comments or inverted blocks. */
@@ -341,7 +470,7 @@ final class Token_Renderer {
 
 		$brand = array_merge( $this->get_default_branding(), $branding );
 
-		return array(
+		$view = array(
 			'branding' => $brand,
 			'customer' => array(
 				'name'                => (string) ( $customer['name'] ?? '' ),
@@ -364,6 +493,9 @@ final class Token_Renderer {
 			'warranty'      => array(
 				'parts_years' => $parts_years,
 				'labor_years' => $labor_years,
+				'has_parts' => $parts_years > 0,
+				'has_labor' => $labor_years > 0,
+				'has_any' => $parts_years > 0 || $labor_years > 0,
 			),
 			'rebates'       => $rebates,
 			'has_rebates'   => ! empty( $rebates ),
@@ -384,9 +516,100 @@ final class Token_Renderer {
 				'deposit_percent'         => $deposit_pct,
 				'deposit_amount'          => $deposit_amount,
 				'deposit_amount_formatted' => $this->format_money( $deposit_amount ),
+				'project_adjustment' => (float) ( $pricing['project_adjustment'] ?? 0 ),
+				'project_adjustment_formatted' => $this->format_money( (float) ( $pricing['project_adjustment'] ?? 0 ) ),
+				'has_project_adjustment' => 0.0 !== (float) ( $pricing['project_adjustment'] ?? 0 ),
 			),
 			'special_notes' => (string) ( $options['special_notes'] ?? '' ),
 		);
+		$view['proposal_systems'] = $this->build_proposal_system_views( $payload, $customer, $catalog_by_id, $template_meta, $branding );
+		$view['has_proposal_choices'] = ! empty( $view['proposal_systems'] );
+		$view['proposal_addons'] = $this->build_proposal_addon_views( (array) ( $payload['_proposal_addons'] ?? array() ) );
+		return $view;
+	}
+
+	/**
+	 * Keep all offered alternatives separate from the selected systems consumed by
+	 * Books/CRM. Only explicit option sale totals cross into this public view.
+	 */
+	private function build_proposal_system_views( array $payload, array $customer, array $catalog_by_id, array $template_meta, array $branding ): array {
+		$offered = (array) ( $payload['_proposal_systems'] ?? array() );
+		$has_choices = false;
+		foreach ( $offered as $system ) {
+			if ( is_array( $system ) && ! empty( $system['choices'] ) && is_array( $system['choices'] ) ) {
+				$has_choices = true;
+			}
+		}
+		if ( ! $has_choices ) {
+			return array();
+		}
+		$result = array();
+		foreach ( $offered as $index => $system ) {
+			if ( ! is_array( $system ) ) {
+				continue;
+			}
+			$number = (int) ( $system['system_number'] ?? $index + 1 );
+			$label = (string) ( $system['system_label'] ?? sprintf( 'System %d', $number ) );
+			$choices = $system['choices'] ?? null;
+			$legacy = ! is_array( $choices ) || empty( $choices );
+			$selected_id = $legacy ? 'legacy_' . $number : (string) ( $system['selected_choice_id'] ?? '' );
+			if ( $legacy ) {
+				$choices = array( array( 'choice_id' => $selected_id, 'label' => 'Current selection', 'equipment' => (array) ( $system['equipment'] ?? array() ) ) );
+			}
+			$choice_views = array();
+			foreach ( $choices as $choice ) {
+				if ( ! is_array( $choice ) ) {
+					continue;
+				}
+				// This nested view has no offered metadata, so it cannot recurse or
+				// accidentally turn alternatives into additional physical systems.
+				$nested = $this->build_payload_view( array( 'systems' => array( array(
+					'system_number' => $number, 'system_label' => $label, 'equipment' => (array) ( $choice['equipment'] ?? array() ),
+				) ) ), $customer, $catalog_by_id, $template_meta, $branding );
+				$items = (array) ( $nested['systems'][0]['items'] ?? array() );
+				$catalog_sales = array_sum( array_map( static fn ( array $item ): float => (float) ( $item['rate'] ?? 0 ), $items ) );
+				$sale = $legacy ? $catalog_sales : (float) ( $choice['sales_price'] ?? 0 );
+				$public_items = array();
+				foreach ( $items as $item ) {
+					$public_items[] = array_intersect_key( $item, array_flip( array(
+						'item_id', 'slot', 'slot_label', 'name', 'display_name', 'brand', 'model', 'short_description', 'notes',
+						'tons', 'btu_input', 'btu_output', 'afue', 'efficiency_percent', 'seer', 'refrigerant', 'category_2',
+					) ) );
+				}
+				$choice_views[] = array(
+					'choice_id' => (string) ( $choice['choice_id'] ?? '' ),
+					'label' => (string) ( $choice['label'] ?? 'Option' ),
+					'sales_price' => $sale,
+					'sales_price_formatted' => $this->format_money( $sale ),
+					'is_selected' => (string) ( $choice['choice_id'] ?? '' ) === $selected_id,
+					'items' => $public_items,
+				);
+			}
+			$result[] = array( 'system_number' => $number, 'system_label' => $label, 'selected_choice_id' => $selected_id, 'choices' => $choice_views );
+		}
+		return $result;
+	}
+
+	/** Canonical records are freshly resolved by the authenticated endpoint helper. */
+	private function build_proposal_addon_views( array $records ): array {
+		$names = array( 'maintenance' => 'New Residential System Maintenance Agreement', 'permits' => 'Permits & Inspections' );
+		$result = array();
+		foreach ( $names as $key => $name ) {
+			$record = $records[ $key ] ?? null;
+			if ( ! is_array( $record ) || true !== ( $record['available'] ?? null ) || ( $record['name'] ?? null ) !== $name ||
+				! is_string( $record['item_id'] ?? null ) || 1 !== preg_match( '/^[0-9]{10,20}$/', $record['item_id'] ) ||
+				! is_numeric( $record['rate'] ?? null ) || 0.0 !== (float) $record['rate'] || (int) ( $record['quantity'] ?? 0 ) !== 1 ) {
+				continue;
+			}
+			$description = 'maintenance' === $key ? 'Renews at $349 for one unit.' : implode( "\n\n", $this->permit_paragraphs() );
+			$result[ $key ] = array( 'available' => true, 'addon_key' => $key, 'item_id' => $record['item_id'], 'name' => $name,
+				'rate' => 0.0, 'rate_formatted' => '$0.00', 'quantity' => 1, 'description' => $description );
+			if ( 'maintenance' === $key ) {
+				$result[ $key ]['renewal_rate'] = 349.0;
+				$result[ $key ]['renewal_units'] = 1;
+			}
+		}
+		return $result;
 	}
 
 	private function format_money( float $amount ): string {

@@ -136,7 +136,7 @@ namespace {
 		return array( 'code' => 0, 'items' => $items, 'page_context' => array( 'page' => $page, 'has_more_page' => $has_more ) );
 	}
 	function catalog_key( string $org = ORG_A, string $tag = TAG_A, string $option = OPTION_A ): string {
-		return 'books_items_package_tag_v3_' . $org . '_' . $tag . '_' . $option;
+		return 'books_items_package_tag_v4_' . $org . '_' . $tag . '_' . $option;
 	}
 	function catalog_calls( string $path, ?string $org = null ): array {
 		return array_values( array_filter( Zoho_API::instance()->calls, static fn ( array $call ): bool =>
@@ -161,6 +161,24 @@ namespace {
 	}
 	function selection_system( array $equipment ): array {
 		return array( array( 'system_number' => 1, 'system_label' => 'Synthetic system', 'equipment' => $equipment ) );
+	}
+	function proposal_addon_item( string $key, array $overrides = array() ): array {
+		return array_replace( array(
+			'item_id' => 'maintenance' === $key ? '90100000001' : '90100000002',
+			'name' => 'maintenance' === $key ? 'New Residential System Maintenance Agreement' : 'Permits & Inspections',
+			'status' => 'active', 'is_combo_product' => false, 'rate' => 0,
+			'product_type' => 'maintenance' === $key ? 'service' : 'goods',
+			'purchase_rate' => 25, 'tags' => array(),
+		), $overrides );
+	}
+	function route_proposal_addons( array $items, string $org = ORG_A ): void {
+		// Return all rows deliberately: production must still compare the exact name.
+		route_catalog( '/items', catalog_page( $items ), $org );
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) && is_string( $item['item_id'] ?? null ) ) {
+				route_catalog( '/items/' . $item['item_id'], array( 'item' => $item ), $org );
+			}
+		}
 	}
 
 	run_catalog_case( 'Package tag replaces checkbox for true, false and absent values', function (): void {
@@ -387,6 +405,9 @@ namespace {
 		'negative purchase cost' => static function ( array $row ): array { $row['purchase_cost'] = -1.0; return $row; },
 		'string purchase cost' => static function ( array $row ): array { $row['purchase_cost'] = '1250'; return $row; },
 		'unknown cost claimed known' => static function ( array $row ): array { $row['purchase_cost_status'] = 'known'; return $row; },
+		'missing Category 2' => static function ( array $row ): array { unset( $row['category_2'] ); return $row; },
+		'unknown Category 2' => static function ( array $row ): array { $row['category_2'] = 'SILVER'; return $row; },
+		'non-string Category 2' => static function ( array $row ): array { $row['category_2'] = array( 'Standard-Efficiency SILVER' ); return $row; },
 	);
 	foreach ( $cache_mutations as $label => $mutate ) {
 		run_catalog_case( 'rebuilds invalid cached metadata: ' . $label, function () use ( $mutate ): void {
@@ -595,7 +616,7 @@ namespace {
 		$catalog = reset_catalog_test();
 		route_catalog( '/items', catalog_page( array( catalog_item( ITEM_A, array( 'is_combo_product' => true, 'name' => 'Synthetic Package no ratings' ) ) ) ) );
 		same_catalog( 1, $catalog->search_selector()['total'], 'Unfiltered selection includes unknown ratings' );
-		same_catalog( array( 'btus' => array(), 'tons' => array(), 'efficiencies' => array() ), $catalog->search_selector()['facets'], 'Missing ratings do not create a zero facet' );
+		same_catalog( array( 'btus' => array(), 'tons' => array(), 'efficiencies' => array(), 'category2' => array() ), $catalog->search_selector()['facets'], 'Missing ratings do not create a zero facet' );
 		same_catalog( 0, $catalog->search_selector( array( 'btu' => 80000 ) )['total'], 'Unknown BTU cannot satisfy a selected BTU' );
 		same_catalog( 0, $catalog->search_selector( array( 'tons' => 2 ) )['total'], 'Unknown tonnage cannot satisfy selected tonnage' );
 	} );
@@ -610,10 +631,80 @@ namespace {
 			array( 'limit' => 'many' ), array( 'limit' => '50x' ), array( 'limit' => array( 50 ) ),
 			array( 'efficiency' => 0 ), array( 'efficiency' => -1 ), array( 'efficiency' => 101 ),
 			array( 'efficiency' => '96 SEER' ), array( 'efficiency' => '96% extra' ), array( 'efficiency' => array( 96 ) ),
+			array( 'category2' => 'SILVER' ), array( 'category2' => 'standard-efficiency silver' ),
+			array( 'category2' => 'Standard-Efficiency SILVER ' ), array( 'category2' => array( 'Standard-Efficiency SILVER' ) ),
 		) as $args ) {
 			selector_error( $catalog->search_selector( $args ) );
 		}
 		same_catalog( array(), catalog_calls( '/items' ), 'Malformed filters fail before catalog reads' );
+	} );
+
+	run_catalog_case( 'Category 2 preserves exact structured values across provider shapes', function (): void {
+		foreach ( Equipment_Catalog::CATEGORY2_VALUES as $value ) {
+			foreach ( array(
+				array( 'cf_category_2' => $value ),
+				array( 'custom_fields' => array( array( 'api_name' => 'cf_category_2', 'value' => $value ) ) ),
+				array( 'custom_field_hash' => array( 'cf_category_2' => $value ) ),
+			) as $shape ) {
+				$item = normalize_catalog_fixture( $shape );
+				same_catalog( $value, $item['category_2'], 'Exact structured Category 2 is preserved without case or tier merging' );
+			}
+		}
+		$item = normalize_catalog_fixture( array(
+			'cf_category_2' => 'Standard-Efficiency SILVER',
+			'custom_fields' => array( array( 'api_name' => 'cf_category_2', 'value' => 'Standard-Efficiency SILVER' ) ),
+			'custom_field_hash' => array( 'cf_category_2' => 'Standard-Efficiency SILVER' ),
+		) );
+		same_catalog( 'Standard-Efficiency SILVER', $item['category_2'], 'Consistent duplicate provider shapes are not ambiguous' );
+	} );
+
+	run_catalog_case( 'Category 2 never falls back to names or reporting tags and cannot grant eligibility', function (): void {
+		foreach ( array( null, '', 'SILVER', 'standard-efficiency silver', 'Standard-Efficiency SILVER ', true, array( 'Standard-Efficiency SILVER' ) ) as $value ) {
+			$item = normalize_catalog_fixture( array(
+				'cf_category_2' => $value, 'name' => 'Synthetic Standard-Efficiency SILVER Package',
+				'tags' => array( catalog_tag(), array( 'tag_name' => 'Package Tier', 'tag_option_name' => 'Standard-Efficiency SILVER' ) ),
+			) );
+			same_catalog( null, $item['category_2'], 'Missing, invalid or differently spelled data stays unknown despite name and tag labels' );
+			same_catalog( true, $item['for_estimate'], 'Unknown Category 2 does not revoke independently verified Package-tag eligibility' );
+		}
+		$item = normalize_catalog_fixture( array( 'cf_category_2' => 'Standard-Efficiency SILVER', 'custom_field_hash' => array( 'cf_category_2' => 'High-Efficiency SILVER' ) ) );
+		same_catalog( null, $item['category_2'], 'Conflicting structured fields do not select an arbitrary tier' );
+		$catalog = reset_catalog_test();
+		$raw = catalog_item( ITEM_A, array( 'tags' => array(), 'is_combo_product' => true, 'cf_category_2' => 'Standard-Efficiency SILVER' ) );
+		route_catalog( '/items/' . ITEM_A, array( 'item' => $raw ) );
+		catalog_error( $catalog->get_item( ITEM_A ), 'tc_estimate_item_not_eligible', 400 );
+		route_catalog( '/items', catalog_page( array( $raw ) ) );
+		same_catalog( 0, $catalog->search_selector( array( 'category2' => 'Standard-Efficiency SILVER' ) )['total'], 'Category 2 cannot admit an untagged item to the main catalog' );
+	} );
+
+	run_catalog_case( 'Category 2 combines with all filters before pagination and retains full category facets', function (): void {
+		$catalog = reset_catalog_test();
+		$values = Equipment_Catalog::CATEGORY2_VALUES;
+		$items = array();
+		for ( $index = 0; $index < 144; $index++ ) {
+			$items[] = catalog_item( '99' . str_pad( (string) $index, 9, '0', STR_PAD_LEFT ), array(
+				'is_combo_product' => true, 'name' => 'Synthetic tier package ' . $index,
+				'cf_category_2' => $values[ $index % 6 ], 'cf_btu_input' => 100000, 'cf_tons' => 1.5,
+				'cf_afue' => 0 === $index % 2 ? 80 : 96,
+				'cf_mfg_part_number' => 143 === $index ? 'LATE-TIER-TARGET' : 'OTHER',
+			) );
+		}
+		$items[] = catalog_item( '99000000999', array( 'is_combo_product' => true, 'name' => 'Synthetic Package without Category 2' ) );
+		route_catalog( '/items', catalog_page( $items ) );
+		$all = $catalog->search_selector();
+		same_catalog( 145, $all['total'], 'All includes otherwise eligible packages without Category 2' );
+		same_catalog( $values, $all['facets']['category2'], 'All six exact values are category-wide in stable tier order' );
+		$filtered = $catalog->search_selector( array( 'category' => 'package', 'category2' => 'High-Efficiency PLATINUM', 'q' => 'late-tier-target', 'brand' => 'fixture brand', 'btu' => 100000, 'tons' => 1.5, 'efficiency' => 96, 'limit' => 1 ) );
+		same_catalog( array( $items[143]['item_id'] ), array_column( $filtered['items'], 'item_id' ), 'Exact Category 2 AND every other filter finds a package beyond the first hundred' );
+		same_catalog( 1, $filtered['total'], 'Category 2 total is calculated before pagination' );
+		same_catalog( $all['facets'], $filtered['facets'], 'Exact Category 2 does not narrow any category-wide facets' );
+		same_catalog( 0, $catalog->search_selector( array( 'category2' => 'Standard-Efficiency PLATINUM', 'q' => 'late-tier-target' ) )['total'], 'Standard and High efficiency tiers are not merged' );
+		$tier = $catalog->search_selector( array( 'category2' => 'Standard-Efficiency SILVER', 'page' => 2, 'limit' => 10 ) );
+		same_catalog( 24, $tier['total'], 'Tier filtering considers the complete catalog' );
+		same_catalog( 10, count( $tier['items'] ), 'Paging slices only the matching tier records' );
+		same_catalog( $items[60]['item_id'], $tier['items'][0]['item_id'], 'Tier page two begins at its filtered offset' );
+		same_catalog( true, $tier['has_more'], 'Tier pagination retains a truthful next-page marker' );
+		same_catalog( array(), $catalog->search_selector( array( 'category' => 'ac' ) )['facets']['category2'], 'Absent category metadata creates no invented facet' );
 	} );
 
 	run_catalog_case( 'AFUE percentages use complete structured values and explicit parent labels only', function (): void {
@@ -820,6 +911,138 @@ namespace {
 		}
 		$map[ ITEM_B ]['for_estimate'] = false;
 		catalog_error( $catalog->validate_selection( selection_system( array( 'furnace' => array( 'item_id' => ITEM_B ) ) ), $map ), 'tc_estimate_bad_equipment_selection', 400 );
+	} );
+
+	run_catalog_case( 'proposal addons use exact fresh zero-price identities without internal cost fields', function (): void {
+		$catalog = reset_catalog_test();
+		route_proposal_addons( array( proposal_addon_item( 'maintenance' ), proposal_addon_item( 'permits' ) ) );
+		$addons = $catalog->proposal_addons();
+		same_catalog( array( 'maintenance', 'permits' ), array_keys( $addons ), 'Only the two fixed proposal addons are exposed' );
+		foreach ( $addons as $key => $addon ) {
+			same_catalog( true, $addon['available'], 'Exact active noncomposite zero item is available' );
+			same_catalog( proposal_addon_item( $key )['item_id'], $addon['item_id'], 'Fresh provider identity is retained' );
+			same_catalog( 0.0, $addon['rate'], 'Current proposal rate is zero' );
+			same_catalog( 1, $addon['quantity'], 'Each addon is one proposal line, not one per tier or system' );
+			check_catalog( ! array_key_exists( 'purchase_cost', $addon ) && ! array_key_exists( 'purchase_rate', $addon ), 'Addon response excludes internal purchase cost' );
+			check_catalog( ! array_key_exists( 'for_estimate', $addon ), 'Separate addon resolution does not grant catalog eligibility' );
+		}
+		same_catalog( 349.0, $addons['maintenance']['renewal_rate'], 'Maintenance renewal rate is explicit product policy' );
+		same_catalog( 1, $addons['maintenance']['renewal_units'], 'Maintenance policy specifies one renewal unit' );
+		check_catalog( ! array_key_exists( 'renewal_rate', $addons['permits'] ), 'Permits cannot inherit maintenance renewal policy' );
+		same_catalog( array(), catalog_calls( '/reportingtags' ), 'Separate lookup does not use or alter Package metadata' );
+		same_catalog( 1, count( catalog_calls( '/items/90100000001' ) ), 'Maintenance list identity is checked with a fresh detail' );
+		same_catalog( 1, count( catalog_calls( '/items/90100000002' ) ), 'Permits list identity is checked with a fresh detail' );
+	} );
+
+	run_catalog_case( 'addon flag parsing is strict and unchecked options perform no lookups', function (): void {
+		$catalog = reset_catalog_test();
+		same_catalog( array(), $catalog->resolve_proposal_addons( array() ), 'Missing flags select no addons' );
+		same_catalog( array(), $catalog->resolve_proposal_addons( array( 'include_maintenance' => false, 'include_permits' => false, 'maintenance_item_id' => '99999999999' ) ), 'False flags and arbitrary client identity do not select addons' );
+		foreach ( array( 'true', 'false', 1, 0, null, array( true ) ) as $value ) {
+			catalog_error( $catalog->resolve_proposal_addons( array( 'include_maintenance' => $value ) ), 'tc_estimate_bad_proposal_addon_selection', 400 );
+			catalog_error( $catalog->resolve_proposal_addons( array( 'include_permits' => $value ) ), 'tc_estimate_bad_proposal_addon_selection', 400 );
+		}
+		foreach ( array( 'arbitrary', '90100000001', '../items/90100000001' ) as $key ) {
+			catalog_error( $catalog->get_proposal_addon( $key ), 'tc_estimate_bad_proposal_addon', 400 );
+		}
+		same_catalog( array(), Zoho_API::instance()->calls, 'Malformed, unselected and arbitrary-key requests fail before any provider read' );
+	} );
+
+	foreach ( array(
+		'missing exact item' => array( 'name' => 'New Residential System Maintenance Agreement Renewal', 'rate' => 349 ),
+		'wrong name case' => array( 'name' => 'new residential system maintenance agreement' ),
+		'inactive exact item' => array( 'status' => 'inactive' ),
+		'nonzero current price' => array( 'rate' => 1 ),
+		'malformed current price' => array( 'rate' => '0 dollars' ),
+		'non-boolean current price' => array( 'rate' => false ),
+		'composite item' => array( 'is_combo_product' => true ),
+		'unverified composite flag' => array( 'is_combo_product' => 'false' ),
+		'invalid provider identity' => array( 'item_id' => 'invalid' ),
+	) as $label => $change ) {
+		run_catalog_case( 'addon fails closed for ' . $label, function () use ( $change ): void {
+			$catalog = reset_catalog_test();
+			route_proposal_addons( array( proposal_addon_item( 'maintenance', $change ) ) );
+			catalog_error( $catalog->get_proposal_addon( 'maintenance' ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		} );
+	}
+
+	run_catalog_case( 'addon exact-name uniqueness excludes ambiguous and near-match fee items', function (): void {
+		$catalog = reset_catalog_test();
+		route_proposal_addons( array( proposal_addon_item( 'maintenance' ), proposal_addon_item( 'maintenance', array( 'item_id' => '90100000003' ) ) ) );
+		catalog_error( $catalog->get_proposal_addon( 'maintenance' ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		same_catalog( array(), catalog_calls( '/items/90100000001' ), 'Ambiguity is rejected before trusting a detail' );
+		route_proposal_addons( array(
+			proposal_addon_item( 'permits', array( 'name' => 'Permit Fee', 'rate' => 1 ) ),
+			proposal_addon_item( 'permits', array( 'item_id' => '90100000004', 'name' => 'Permit Application Fee' ) ),
+		) );
+		catalog_error( $catalog->get_proposal_addon( 'permits' ), 'tc_estimate_proposal_addon_unavailable', 400 );
+	} );
+
+	foreach ( array(
+		'wrong detail identity' => array( 'item_id' => '90100000009' ),
+		'wrong detail name' => array( 'name' => 'Another optional item' ),
+		'inactive detail' => array( 'status' => 'inactive' ),
+		'nonzero detail' => array( 'rate' => 349 ),
+		'composite detail' => array( 'is_combo_product' => true ),
+	) as $label => $change ) {
+		run_catalog_case( 'addon rejects ' . $label, function () use ( $change ): void {
+			$catalog = reset_catalog_test();
+			route_proposal_addons( array( proposal_addon_item( 'maintenance' ) ) );
+			route_catalog( '/items/90100000001', array( 'item' => proposal_addon_item( 'maintenance', $change ) ) );
+			catalog_error( $catalog->resolve_proposal_addons( array( 'include_maintenance' => true ) ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		} );
+	}
+
+	run_catalog_case( 'addon availability hides provider details and selected stale options revalidate', function (): void {
+		$catalog = reset_catalog_test();
+		route_proposal_addons( array( proposal_addon_item( 'maintenance' ), proposal_addon_item( 'permits' ) ) );
+		$before = $catalog->proposal_addons();
+		same_catalog( true, $before['maintenance']['available'], 'Initial availability can be displayed' );
+		route_catalog( '/items/90100000001', array( 'item' => proposal_addon_item( 'maintenance', array( 'rate' => 349 ) ) ) );
+		catalog_error( $catalog->resolve_proposal_addons( array( 'include_maintenance' => true ) ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		same_catalog( 2, count( catalog_calls( '/items/90100000001' ) ), 'An earlier availability response cannot authorize a later changed item' );
+		route_catalog( '/items', new WP_Error( 'provider_secret_code', 'Private provider debug text', array( 'status' => 502, 'body' => 'PRIVATE-SYNTHETIC-BODY' ) ) );
+		$unavailable = $catalog->proposal_addons();
+		foreach ( $unavailable as $addon ) {
+			same_catalog( false, $addon['available'], 'Provider failures become unavailable options' );
+			same_catalog( null, $addon['item_id'], 'Unavailable response cannot retain a stale identity' );
+			same_catalog( 'tc_estimate_proposal_addon_unavailable', $addon['error_code'], 'Only the safe application error code is returned' );
+		}
+		check_catalog( ! str_contains( json_encode( $unavailable ), 'PRIVATE-SYNTHETIC-BODY' ) && ! str_contains( json_encode( $unavailable ), 'provider_secret_code' ), 'No provider debug details leak through availability' );
+	} );
+
+	run_catalog_case( 'addon pagination is complete, bounded and does not accept partial unique matches', function (): void {
+		$catalog = reset_catalog_test();
+		$item = proposal_addon_item( 'maintenance' );
+		route_catalog( '/items', static fn ( array $query ): array => catalog_page( 2 === $query['page'] ? array( $item ) : array(), 1 === $query['page'], $query['page'] ) );
+		route_catalog( '/items/90100000001', array( 'item' => $item ) );
+		same_catalog( true, $catalog->get_proposal_addon( 'maintenance' )['available'], 'Exact match on a later page is resolved only after complete pagination' );
+		foreach ( catalog_calls( '/items' ) as $call ) {
+			same_catalog( 200, $call['query']['per_page'], 'Addon provider page size stays bounded' );
+			same_catalog( $item['name'], $call['query']['name_contains'], 'Provider filter is the fixed allowlisted name' );
+		}
+		$catalog = reset_catalog_test();
+		route_catalog( '/items', static fn ( array $query ): array|WP_Error => 1 === $query['page'] ? catalog_page( array( $item ), true ) : new WP_Error( 'network_failure', 'Synthetic failure', array( 'status' => 503 ) ) );
+		catalog_error( $catalog->get_proposal_addon( 'maintenance' ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		same_catalog( array(), catalog_calls( '/items/90100000001' ), 'Partial uniqueness is not enough to trust a detail' );
+		$catalog = reset_catalog_test();
+		route_catalog( '/items', static fn ( array $query ): array => catalog_page( array(), true, $query['page'] ) );
+		catalog_error( $catalog->get_proposal_addon( 'maintenance' ), 'tc_estimate_proposal_addon_unavailable', 400 );
+		same_catalog( 50, count( catalog_calls( '/items' ) ), 'Addon lookup cannot exceed the fifty-page ceiling' );
+	} );
+
+	run_catalog_case( 'selected addons use canonical fresh identities once per proposal without Package bypass', function (): void {
+		$catalog = reset_catalog_test();
+		route_proposal_addons( array( proposal_addon_item( 'maintenance' ), proposal_addon_item( 'permits' ) ) );
+		$selected = $catalog->resolve_proposal_addons( array( 'include_maintenance' => true, 'include_permits' => true, 'maintenance_item_id' => '99999999999', 'maintenance_rate' => 999 ) );
+		same_catalog( array( 'maintenance', 'permits' ), array_keys( $selected ), 'Only selected canonical addons are returned' );
+		same_catalog( '90100000001', $selected['maintenance']['item_id'], 'Client-supplied identity is ignored' );
+		same_catalog( 0.0, $selected['maintenance']['rate'], 'Client-supplied price is ignored' );
+		catalog_error( $catalog->get_item( '90100000001' ), 'tc_estimate_item_not_eligible', 400 );
+		catalog_error( $catalog->get_item( '90100000002' ), 'tc_estimate_item_not_eligible', 400 );
+		same_catalog( array(), $catalog->search(), 'Untagged addons remain absent from the main array catalog' );
+		same_catalog( 0, $catalog->search_selector()['total'], 'Untagged addons remain absent from the shared equipment selector' );
+		catalog_error( $catalog->validate_selection( selection_system( array( 'permit' => array( 'item_id' => '90100000002' ) ) ), array( '90100000002' => $selected['permits'] ) ), 'tc_estimate_bad_equipment_selection', 400 );
 	} );
 
 	echo "Catalog smoke: {$passed} cases passed, {$failed} failed; {$assertions} assertions passed.\n";

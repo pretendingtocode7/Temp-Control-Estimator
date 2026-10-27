@@ -149,6 +149,9 @@ describe("reconstructed classic service worker", () => {
 
   it.each([
     ["GET", "/wp-json/tc-estimate/v1/customers?q=customer"],
+    ["GET", "/wp-json/tc-estimate/v1/customer-choices/view"],
+    ["POST", "/wp-json/tc-estimate/v1/customer-choices/view"],
+    ["POST", "/wp-json/tc-estimate/v1/customer-choices/apply"],
     ["GET", "/wp-json/tc-estimate/v1/preview"],
     ["GET", "/wp-json/tc-estimate/v1/generate"],
     ["GET", "/wp-json/tc-estimate/v1/update-estimate"],

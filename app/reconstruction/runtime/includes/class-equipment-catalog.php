@@ -24,11 +24,20 @@ final class Equipment_Catalog {
 
 	private const MAX_PAGES = 50;
 	private const PER_PAGE  = 200;
-	private const CACHE_POLICY = 'package_tag_v3';
+	private const CACHE_POLICY = 'package_tag_v4';
 	private const LIST_CACHE_TTL = 900;
 	private const MAX_COMPOSITE_COMPONENTS = 100;
 	private const SELECTOR_TYPES = array(
 		'package' => 'package', 'ac' => 'condenser', 'furnace' => 'furnace', 'coil' => 'evaporator_coil',
+	);
+	public const CATEGORY2_VALUES = array(
+		'Standard-Efficiency SILVER', 'High-Efficiency SILVER',
+		'Standard-Efficiency GOLD', 'High-Efficiency GOLD',
+		'Standard-Efficiency PLATINUM', 'High-Efficiency PLATINUM',
+	);
+	private const PROPOSAL_ADDONS = array(
+		'maintenance' => 'New Residential System Maintenance Agreement',
+		'permits' => 'Permits & Inspections',
 	);
 
 	/** Resolved from Books once per organization during this PHP request. */
@@ -94,6 +103,10 @@ final class Equipment_Catalog {
 		if ( ! is_string( $category ) || ! isset( self::SELECTOR_TYPES[ $category ] ) ) {
 			return $this->invalid_selector_filter();
 		}
+		$category2 = $args['category2'] ?? '';
+		if ( ! is_string( $category2 ) || ( '' !== $category2 && ! in_array( $category2, self::CATEGORY2_VALUES, true ) ) ) {
+			return $this->invalid_selector_filter();
+		}
 		foreach ( array( 'q', 'brand' ) as $field ) {
 			if ( isset( $args[ $field ] ) && ! is_string( $args[ $field ] ) ) {
 				return $this->invalid_selector_filter();
@@ -126,6 +139,7 @@ final class Equipment_Catalog {
 		$btus = array();
 		$tons = array();
 		$efficiencies = array();
+		$category2_values = array();
 		foreach ( $items as $entry ) {
 			if ( $entry['selection_category'] !== $category ) {
 				continue;
@@ -139,7 +153,11 @@ final class Equipment_Catalog {
 			if ( null !== $entry['efficiency_percent'] ) {
 				$efficiencies[] = $entry['efficiency_percent'];
 			}
+			if ( null !== $entry['category_2'] ) {
+				$category2_values[] = $entry['category_2'];
+			}
 			if ( ( '' !== $brand && 0 !== strcasecmp( $entry['brand'], $brand ) ) ||
+				( '' !== $category2 && $entry['category_2'] !== $category2 ) ||
 				! $this->matches_text( $entry, $q ) ||
 				( null !== $filters['btu'] && $entry['btu_input'] !== $filters['btu'] ) ||
 				( null !== $filters['tons'] && ( null === $entry['tons'] || (float) $entry['tons'] !== $filters['tons'] ) ) ||
@@ -154,6 +172,7 @@ final class Equipment_Catalog {
 		sort( $btus, SORT_NUMERIC );
 		sort( $tons, SORT_NUMERIC );
 		sort( $efficiencies, SORT_NUMERIC );
+		$category2_values = array_values( array_filter( self::CATEGORY2_VALUES, static fn ( string $value ): bool => in_array( $value, $category2_values, true ) ) );
 		$total = count( $matches );
 		// Avoid overflowing an offset for an otherwise valid, very distant page.
 		$offset = $page > intdiv( PHP_INT_MAX, $limit ) ? $total : ( $page - 1 ) * $limit;
@@ -163,7 +182,7 @@ final class Equipment_Catalog {
 			'page' => $page,
 			'per_page' => $limit,
 			'has_more' => $offset < $total && $limit < $total - $offset,
-			'facets' => array( 'btus' => $btus, 'tons' => $tons, 'efficiencies' => $efficiencies ),
+			'facets' => array( 'btus' => $btus, 'tons' => $tons, 'efficiencies' => $efficiencies, 'category2' => $category2_values ),
 		);
 	}
 
@@ -298,6 +317,107 @@ final class Equipment_Catalog {
 			);
 		}
 		return $normalized;
+	}
+
+	/** Separate authenticated proposal options; these do not enter the tagged catalog. */
+	public function proposal_addons(): array {
+		$result = array();
+		foreach ( self::PROPOSAL_ADDONS as $key => $name ) {
+			$addon = $this->get_proposal_addon( $key );
+			$result[ $key ] = is_wp_error( $addon )
+				? array( 'available' => false, 'addon_key' => $key, 'item_id' => null, 'name' => $name, 'rate' => 0.0, 'error_code' => $addon->get_error_code() )
+				: $addon;
+		}
+		return $result;
+	}
+
+	/** Only the two fixed names can be resolved, with a fresh detail identity check. */
+	public function get_proposal_addon( string $key ): array|WP_Error {
+		if ( ! isset( self::PROPOSAL_ADDONS[ $key ] ) ) {
+			return new WP_Error( 'tc_estimate_bad_proposal_addon', __( 'Unknown proposal option.', 'tc-estimate' ), array( 'status' => 400 ) );
+		}
+		$org_id = $this->organization_id();
+		if ( is_wp_error( $org_id ) ) {
+			return $this->unavailable_proposal_addon();
+		}
+		$name = self::PROPOSAL_ADDONS[ $key ];
+		$matches = array();
+		$complete = false;
+		for ( $page = 1; $page <= self::MAX_PAGES; $page++ ) {
+			$response = Zoho_API::instance()->get( Zoho_API::SERVICE_BOOKS, '/items', array(
+				'organization_id' => $org_id, 'filter_by' => 'Status.Active', 'name_contains' => $name,
+				'page' => $page, 'per_page' => self::PER_PAGE, 'sort_column' => 'name',
+			) );
+			if ( is_wp_error( $response ) || $this->provider_failed( $response ) ||
+				! isset( $response['items'] ) || ! is_array( $response['items'] ) || ! array_is_list( $response['items'] ) ||
+				! is_bool( $response['page_context']['has_more_page'] ?? null ) ) {
+				return $this->unavailable_proposal_addon();
+			}
+			foreach ( $response['items'] as $item ) {
+				if ( is_array( $item ) && ( $item['name'] ?? null ) === $name && $this->is_active_item( $item ) ) {
+					$matches[] = $item;
+				}
+			}
+			if ( count( $matches ) > 1 ) {
+				return $this->unavailable_proposal_addon();
+			}
+			if ( ! $response['page_context']['has_more_page'] ) {
+				$complete = true;
+				break;
+			}
+		}
+		if ( ! $complete || 1 !== count( $matches ) || ! $this->valid_proposal_addon( $matches[0], $name ) ) {
+			return $this->unavailable_proposal_addon();
+		}
+		$id = $matches[0]['item_id'];
+		$response = Zoho_API::instance()->get( Zoho_API::SERVICE_BOOKS, '/items/' . $id, array( 'organization_id' => $org_id ) );
+		if ( is_wp_error( $response ) || $this->provider_failed( $response ) ||
+			! isset( $response['item'] ) || ! is_array( $response['item'] ) ||
+			( $response['item']['item_id'] ?? null ) !== $id || ! $this->valid_proposal_addon( $response['item'], $name ) ) {
+			return $this->unavailable_proposal_addon();
+		}
+		$result = array(
+			'available' => true, 'addon_key' => $key, 'item_id' => $id, 'name' => $name,
+			'rate' => 0.0, 'quantity' => 1, 'source' => 'zoho_books',
+		);
+		if ( 'maintenance' === $key ) {
+			// Renewal is explicit proposal policy, not a price inferred from provider cost.
+			$result['renewal_rate'] = 349.0;
+			$result['renewal_units'] = 1;
+		}
+		return $result;
+	}
+
+	/** Resolve server-validated option flags; no client item ID or price is accepted. */
+	public function resolve_proposal_addons( array $options ): array|WP_Error {
+		foreach ( self::PROPOSAL_ADDONS as $key => $name ) {
+			$flag = 'include_' . $key;
+			if ( array_key_exists( $flag, $options ) && ! is_bool( $options[ $flag ] ) ) {
+				return new WP_Error( 'tc_estimate_bad_proposal_addon_selection', __( 'Proposal option selections must be true or false.', 'tc-estimate' ), array( 'status' => 400 ) );
+			}
+		}
+		$result = array();
+		foreach ( self::PROPOSAL_ADDONS as $key => $name ) {
+			if ( true !== ( $options[ 'include_' . $key ] ?? false ) ) {
+				continue;
+			}
+			$addon = $this->get_proposal_addon( $key );
+			if ( is_wp_error( $addon ) ) {
+				return $addon;
+			}
+			$result[ $key ] = $addon;
+		}
+		return $result;
+	}
+
+	private function valid_proposal_addon( array $item, string $name ): bool {
+		return $this->valid_item_id( $item['item_id'] ?? null ) && ( $item['name'] ?? null ) === $name &&
+			$this->is_active_item( $item ) && false === ( $item['is_combo_product'] ?? null ) &&
+			0.0 === $this->nonnegative_number( $item['rate'] ?? null );
+	}
+
+	private function unavailable_proposal_addon(): WP_Error {
+		return new WP_Error( 'tc_estimate_proposal_addon_unavailable', __( 'A selected proposal option is unavailable or could not be verified. Refresh its availability before continuing.', 'tc-estimate' ), array( 'status' => 400 ) );
 	}
 
 	/**
@@ -479,6 +599,9 @@ final class Equipment_Catalog {
 			if ( ( $item['afue'] ?? null ) !== $item['efficiency_percent'] ) {
 				return false;
 			}
+			if ( ! array_key_exists( 'category_2', $item ) || ( null !== $item['category_2'] && ! in_array( $item['category_2'], self::CATEGORY2_VALUES, true ) ) ) {
+				return false;
+			}
 			if ( null === $item['purchase_cost'] ) {
 				if ( null !== ( $item['purchase_cost_source'] ?? null ) || 'unknown' !== ( $item['purchase_cost_status'] ?? null ) ) {
 					return false;
@@ -563,6 +686,7 @@ final class Equipment_Catalog {
 			'stock_on_hand'          => (float) $this->first_value( $item, $cf, array( 'stock_on_hand', 'available_stock', 'Qty_in_Stock' ), 0 ),
 			'equipment_type'         => $classification['equipment_type'],
 			'selection_category'     => $classification['selection_category'],
+			'category_2'             => $this->item_category2( $item ),
 			'is_composite'           => $classification['is_composite'],
 			'brand'                  => $brand,
 			'model'                  => $model,
@@ -695,6 +819,43 @@ final class Equipment_Catalog {
 
 	private function field_key( string $name ): string {
 		return strtolower( (string) preg_replace( '/[^a-zA-Z0-9]+/', '_', trim( $name ) ) );
+	}
+
+	/** Preserve exact verified Category 2 strings; names and reporting tags are not substitutes. */
+	private function item_category2( array $item ): ?string {
+		$values = array();
+		foreach ( array( $item, $item['custom_field_hash'] ?? array() ) as $fields ) {
+			if ( ! is_array( $fields ) ) {
+				continue;
+			}
+			foreach ( $fields as $key => $value ) {
+				if ( is_string( $key ) && 'cf_category_2' === $this->field_key( $key ) ) {
+					$values[] = $value;
+				}
+			}
+		}
+		if ( isset( $item['custom_fields'] ) && is_array( $item['custom_fields'] ) ) {
+			foreach ( $item['custom_fields'] as $field ) {
+				if ( ! is_array( $field ) ) {
+					continue;
+				}
+				$key = $field['api_name'] ?? $field['placeholder'] ?? $field['label'] ?? '';
+				if ( is_string( $key ) && in_array( $this->field_key( $key ), array( 'cf_category_2', 'category_2' ), true ) ) {
+					$values[] = $field['value'] ?? null;
+				}
+			}
+		}
+		$result = null;
+		foreach ( $values as $value ) {
+			if ( null === $value || '' === $value ) {
+				continue;
+			}
+			if ( ! is_string( $value ) || ! in_array( $value, self::CATEGORY2_VALUES, true ) || ( null !== $result && $result !== $value ) ) {
+				return null;
+			}
+			$result = $value;
+		}
+		return $result;
 	}
 
 	/** Invalid/conflicting structured values suppress the explicit-name fallback. */

@@ -1,34 +1,51 @@
 /** Reconstructed from the saved v0.4.8 deployment bundle; not recovered original source. */
 import {
   equipmentCostSummary,
+  hasSystemChoices,
   newIdempotencyKey,
+  selectedChoice,
+  selectedEquipment,
   sumEquipment,
+  sumSelectedSales,
 } from "./lib/utils.js";
 
 /** Strip hydrated catalog/customer fields at the same boundary as the ZIP client. */
+function equipmentPayload(source) {
+  const equipment = {};
+  for (const [slot, item] of Object.entries(source || {})) {
+    if (!item || !item.item_id) continue;
+    equipment[slot] = { item_id: item.item_id };
+    if (item.notes) equipment[slot].notes = item.notes;
+    if (Object.prototype.hasOwnProperty.call(item, "description")) {
+      equipment[slot].description = item.description;
+    }
+    // Only a municipal permit has a technician-editable price in v0.4.8.
+    if (
+      slot === "permit" &&
+      Object.prototype.hasOwnProperty.call(item, "rate")
+    ) {
+      equipment[slot].rate = item.rate;
+    }
+  }
+  return equipment;
+}
 export function buildPayload(draft, includeBooksEdits = true) {
   const systems = draft.systems.map((system) => {
-    const equipment = {};
-    for (const [slot, item] of Object.entries(system.equipment || {})) {
-      if (!item || !item.item_id) continue;
-      equipment[slot] = { item_id: item.item_id };
-      if (item.notes) equipment[slot].notes = item.notes;
-      if (Object.prototype.hasOwnProperty.call(item, "description")) {
-        equipment[slot].description = item.description;
-      }
-      // Only a municipal permit has a technician-editable price in v0.4.8.
-      if (
-        slot === "permit" &&
-        Object.prototype.hasOwnProperty.call(item, "rate")
-      ) {
-        equipment[slot].rate = item.rate;
-      }
-    }
-    return {
+    const result = {
       system_number: system.system_number,
       system_label: system.system_label,
-      equipment,
+      equipment: equipmentPayload(selectedEquipment(system)),
     };
+    if (Array.isArray(system.choices)) {
+      result.selected_choice_id = system.selected_choice_id;
+      result.choices = system.choices.map((choice) => ({
+        choice_id: choice.choice_id,
+        label: choice.label,
+        equipment: equipmentPayload(choice.equipment),
+        sales_price: choice.sales_price,
+      }));
+    }
+    return result;
   });
   const payload = {
     template_id: draft.template?.id,
@@ -41,6 +58,8 @@ export function buildPayload(draft, includeBooksEdits = true) {
       deposit_percent: draft.pricing.deposit_percent,
     },
   };
+  if (hasSystemChoices(draft.systems))
+    payload.pricing.project_adjustment = draft.pricing.project_adjustment || 0;
   if (includeBooksEdits && draft.books_edits)
     payload.books_edits = draft.books_edits;
   return payload;
@@ -53,9 +72,29 @@ export function canAdvance(draft) {
     case "systems":
       return (
         draft.systems.length > 0 &&
-        draft.systems.every(
-          (system) => Object.keys(system.equipment || {}).length > 0,
-        )
+        draft.systems.every((system) => {
+          const hasEquipment = (equipment) =>
+            Object.values(equipment || {}).some((item) => item?.item_id);
+          if (!Array.isArray(system.choices))
+            return hasEquipment(system.equipment);
+          return (
+            system.choices.length > 0 &&
+            system.choices.length <= 6 &&
+            !!selectedChoice(system) &&
+            new Set(system.choices.map((choice) => choice.choice_id)).size ===
+              system.choices.length &&
+            system.choices.every(
+              (choice) =>
+                !!choice.choice_id &&
+                typeof choice.label === "string" &&
+                choice.label.trim().length > 0 &&
+                choice.label.length <= 60 &&
+                hasEquipment(choice.equipment) &&
+                Number.isFinite(choice.sales_price) &&
+                choice.sales_price >= 0,
+            )
+          );
+        })
       );
     case "pricing":
       return (draft.pricing.total || 0) > 0;
@@ -94,6 +133,8 @@ export function createInitialState() {
       financing_term_months: 60,
       credit_card_fee_applies: false,
       financing_fee_applies: false,
+      include_maintenance: false,
+      include_permits: false,
     },
     pricing: {
       subtotal: 0,
@@ -140,19 +181,51 @@ export function draftReducer(state, action) {
         books_edits: null,
       };
     case "setSystems": {
-      const salesSubtotal = sumEquipment(action.systems);
-      const cost = equipmentCostSummary(action.systems);
+      const systems = action.systems.map((system) =>
+        Array.isArray(system.choices)
+          ? {
+              ...system,
+              choices: system.choices.map((choice) => {
+                if (choice.sales_price_manual) return choice;
+                const sales_price = sumEquipment([
+                  { equipment: choice.equipment },
+                ]);
+                return sales_price === choice.sales_price
+                  ? choice
+                  : { ...choice, sales_price };
+              }),
+            }
+          : system,
+      );
+      const wasChoices = hasSystemChoices(state.systems);
+      const choicesMode = hasSystemChoices(systems);
+      const selectedSales = sumSelectedSales(systems);
+      const salesSubtotal = sumEquipment(systems);
+      const cost = equipmentCostSummary(systems);
+      const adjustment = wasChoices
+        ? state.pricing.project_adjustment || 0
+        : state.pricing.total_manual
+          ? Math.round((state.pricing.total - selectedSales) * 100) / 100
+          : 0;
       return {
         ...state,
-        systems: action.systems,
+        systems,
         pricing: {
           ...state.pricing,
           // Keep the legacy Books subtotal as sales data; actual purchase cost
           // is internal only and is excluded by buildPayload's pricing allowlist.
           subtotal: salesSubtotal,
-          total: state.pricing.total_manual
-            ? state.pricing.total
-            : salesSubtotal,
+          total:
+            choicesMode || wasChoices
+              ? Math.round((selectedSales + adjustment) * 100) / 100
+              : state.pricing.total_manual
+                ? state.pricing.total
+                : salesSubtotal,
+          ...(choicesMode
+            ? { project_adjustment: adjustment, total_manual: adjustment !== 0 }
+            : wasChoices
+              ? { project_adjustment: 0, total_manual: adjustment !== 0 }
+              : {}),
           equipment_cost: state.pricing.equipment_cost_manual
             ? state.pricing.equipment_cost
             : cost.subtotal,
@@ -175,6 +248,19 @@ export function draftReducer(state, action) {
       const pricing = { ...state.pricing, ...action.pricing };
       if (Object.prototype.hasOwnProperty.call(action.pricing, "total"))
         pricing.total_manual = action.pricing.total_manual !== false;
+      if (
+        hasSystemChoices(state.systems) &&
+        Object.prototype.hasOwnProperty.call(action.pricing, "total")
+      ) {
+        const selectedSales = sumSelectedSales(state.systems);
+        pricing.project_adjustment =
+          action.pricing.total_manual === false
+            ? 0
+            : Math.round((pricing.total - selectedSales) * 100) / 100;
+        pricing.total =
+          Math.round((selectedSales + pricing.project_adjustment) * 100) / 100;
+        pricing.total_manual = pricing.project_adjustment !== 0;
+      }
       if (
         Object.prototype.hasOwnProperty.call(action.pricing, "equipment_cost")
       )

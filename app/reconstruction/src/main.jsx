@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import React from "react";
 import { App } from "./App.jsx";
+import { CustomerChoicesPage } from "./components/CustomerChoicesPage.jsx";
 import "./styles.css";
 
 export function registerServiceWorker() {
@@ -48,6 +49,26 @@ export function registerServiceWorker() {
 }
 
 export function mount() {
+  const customerRoot = document.getElementById("tc-customer-choices-root");
+  if (customerRoot) {
+    let boot;
+    try {
+      boot = JSON.parse(customerRoot.dataset.boot || "{}");
+    } catch {
+      customerRoot.innerHTML =
+        '<p class="tc-err">This estimate link is unavailable. Please contact Temp Control.</p>';
+      return;
+    }
+    if (!boot.restUrl) {
+      customerRoot.innerHTML =
+        '<p class="tc-err">This estimate link is unavailable. Please contact Temp Control.</p>';
+      return;
+    }
+    createRoot(customerRoot).render(
+      <CustomerChoicesPage restUrl={boot.restUrl} brand={boot.brand || {}} />,
+    );
+    return; // Public customer pages never mount the staff app or register a worker.
+  }
   const root = document.getElementById("tc-estimate-builder-root");
   if (!root) return;
   let boot;

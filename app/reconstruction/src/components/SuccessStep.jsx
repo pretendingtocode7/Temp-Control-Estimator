@@ -5,10 +5,167 @@ import { formatMoney } from "./../lib/utils.js";
 import { cx } from "./../lib/utils.js";
 import { ProposalEditor } from "./Editors.jsx";
 import { BooksEditor } from "./Editors.jsx";
+import { safeCustomerChoicesLink } from "../lib/customer-choices-api.js";
 export const POLL_INTERVAL_MS = 2000;
 export const MAX_SEND_POLLS = 60;
 export function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+function CustomerChoiceLink({ api, estimateId, disabled }) {
+  const [state, setState] = React.useState({
+    status: "idle",
+    url: "",
+    message: "",
+  });
+  const busy = React.useRef(false);
+  async function createLink() {
+    if (busy.current || disabled) return;
+    busy.current = true;
+    setState({ status: "loading", url: "", message: "" });
+    try {
+      const response = await api.createCustomerChoiceLink(estimateId);
+      if (response?.available !== true) {
+        setState({
+          status: "unavailable",
+          url: "",
+          message:
+            "A customer selection link is not available for this estimate.",
+        });
+        return;
+      }
+      const url = safeCustomerChoicesLink(response.url);
+      if (!url) throw new Error();
+      setState({
+        status: "available",
+        url,
+        message: "Creating this link does not send an email.",
+      });
+    } catch {
+      setState({
+        status: "error",
+        url: "",
+        message: "The customer selection link could not be created. Try again.",
+      });
+    } finally {
+      busy.current = false;
+    }
+  }
+  async function revokeLink() {
+    if (busy.current || disabled) return;
+    busy.current = true;
+    setState((old) => ({ ...old, status: "revoking", message: "" }));
+    try {
+      const response = await api.revokeCustomerChoiceLink(estimateId);
+      if (response?.revoked !== true) throw new Error();
+      setState({
+        status: "idle",
+        url: "",
+        message: "Customer selection link disabled.",
+      });
+    } catch {
+      setState((old) => ({
+        ...old,
+        status: "available",
+        message:
+          "We could not confirm that the link was disabled. Try disabling it again.",
+      }));
+    } finally {
+      busy.current = false;
+    }
+  }
+  async function copyLink() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error();
+      await navigator.clipboard.writeText(state.url);
+      setState((old) => ({
+        ...old,
+        message: "Customer selection link copied.",
+      }));
+    } catch {
+      setState((old) => ({
+        ...old,
+        message: "Copy was unavailable. Select and copy the link above.",
+      }));
+    }
+  }
+  return (
+    <section
+      className="tc-fieldset tc-success-editor"
+      aria-label="Customer package choices"
+    >
+      <h3 className="tc-step-title">Customer package choices</h3>
+      <p className="tc-field-help">
+        The customer can choose one option per physical system and update this
+        existing Books estimate. Choosing an option is not approval or payment.
+      </p>
+      {state.url ? (
+        <>
+          <label className="tc-field">
+            <span className="tc-field-label">Customer selection link</span>
+            <input
+              type="text"
+              className="tc-input"
+              aria-label="Customer selection link"
+              readOnly
+              value={state.url}
+              onFocus={(event) => event.target.select()}
+            />
+          </label>
+          <button
+            type="button"
+            className="tc-btn tc-btn-secondary"
+            disabled={disabled || state.status === "revoking"}
+            onClick={copyLink}
+          >
+            Copy customer selection link
+          </button>
+          {state.status !== "revoking" && (
+            <a
+              className="tc-btn tc-btn-ghost"
+              href={state.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+            >
+              Open package choices
+            </a>
+          )}
+          <button
+            type="button"
+            className="tc-btn tc-btn-ghost tc-btn-danger"
+            disabled={disabled || state.status === "revoking"}
+            onClick={revokeLink}
+          >
+            {state.status === "revoking"
+              ? "Disabling customer selection link…"
+              : "Disable customer selection link"}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="tc-btn tc-btn-secondary"
+          disabled={disabled || state.status === "loading"}
+          onClick={createLink}
+        >
+          {state.status === "loading"
+            ? "Creating customer selection link…"
+            : "Create customer selection link"}
+        </button>
+      )}
+      {disabled && (
+        <p className="tc-field-help">
+          Save any Books changes and wait for the current action to finish
+          before changing this link.
+        </p>
+      )}
+      {state.message && <p role="status">{state.message}</p>}
+      <p className="tc-field-help">
+        The explicit Send action includes a customer selection link in the
+        email. Nothing is emailed when you create or disable a link here.
+      </p>
+    </section>
+  );
 }
 export function SuccessStep({
   api,
@@ -16,6 +173,7 @@ export function SuccessStep({
   proposalHtml,
   booksEdits,
   customerName,
+  hasChoices = false,
   onProposalChange,
   onBooksChange,
   onStartOver,
@@ -288,6 +446,18 @@ export function SuccessStep({
           </li>
         )}
       </ul>
+      {hasChoices && (
+        <CustomerChoiceLink
+          key={result.estimate_id}
+          api={api}
+          estimateId={result.estimate_id}
+          disabled={
+            booksDirty ||
+            saveState.status === "saving" ||
+            ["preparing", "sending", "pending"].includes(sendState.status)
+          }
+        />
+      )}
       <p className="tc-send-explainer">
         {
           "Sending saves any remaining Books edits, attaches the polished proposal PDF, and sends the branded Temp Control email from the website. Nothing is emailed until you press the button below."

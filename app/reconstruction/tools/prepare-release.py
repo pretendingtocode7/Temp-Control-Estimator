@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the offline v0.4.13 efficiency/proposal/pricing release from a clean pinned commit.
+"""Prepare the offline v0.4.14 per-system proposal-options release from a clean pinned commit.
 
 Supply --commit as the complete current HEAD SHA and --output-root as a fresh
 directory inside this workspace but outside the repository. Only ignored npm
@@ -26,8 +26,8 @@ from datetime import datetime, timezone
 ORIGINAL_SHA = '0c1c04ef023b6aa094b2237e1f62452bed8f08d37ed4308e2d9aa0732937f56b'
 EXPECTED_LOCK_SHA = '95086183b87a15a142ea7423540c286ced2ac2711b2d7c9d1e0e1d6184ae642d'
 OLD_VERSION = '0.4.8'
-NEW_VERSION = '0.4.13'
-EXPECTED_TEST_COUNT = 177
+NEW_VERSION = '0.4.14'
+EXPECTED_TEST_COUNT = 259
 SLUG = 'temp-control-estimate-builder'
 ASSETS = ('estimate-builder.js', 'estimate-builder.css', 'service-worker.js', 'estimate-builder.js.map')
 RUNTIME_OVERRIDES = (
@@ -39,6 +39,16 @@ RUNTIME_OVERRIDES = (
     ('app/reconstruction/runtime/endpoints/class-generate-estimate.php', 'endpoints/class-generate-estimate.php'),
     ('app/reconstruction/runtime/includes/class-token-renderer.php', 'includes/class-token-renderer.php'),
     ('app/reconstruction/runtime/includes/class-estimate-generator.php', 'includes/class-estimate-generator.php'),
+    ('app/reconstruction/runtime/includes/class-plugin.php', 'includes/class-plugin.php'),
+    ('app/reconstruction/runtime/includes/class-rest-controller.php', 'includes/class-rest-controller.php'),
+    ('app/reconstruction/runtime/includes/class-zoho-api.php', 'includes/class-zoho-api.php'),
+    ('app/reconstruction/runtime/endpoints/class-send-estimate.php', 'endpoints/class-send-estimate.php'),
+)
+RUNTIME_ADDITIONS = (
+    ('app/reconstruction/runtime/includes/class-proposal-choices.php', 'includes/class-proposal-choices.php'),
+    ('app/reconstruction/runtime/includes/class-customer-choices.php', 'includes/class-customer-choices.php'),
+    ('app/reconstruction/runtime/endpoints/class-customer-choices.php', 'endpoints/class-customer-choices.php'),
+    ('app/reconstruction/runtime/public/class-customer-choice-page.php', 'public/class-customer-choice-page.php'),
 )
 PACKAGING_TOOL_PATH = 'app/reconstruction/tools/prepare-release.py'
 
@@ -106,6 +116,32 @@ def stage_runtime_overrides(source, stage, original_paths, commit):
             'source_commit': commit,
             'original_reference_sha256': original_hash,
             'override_sha256': override_hash,
+        })
+    return provenance
+
+
+def stage_runtime_additions(source, stage, original_paths, commit):
+    """Add only explicit, pinned new runtime files without replacing references."""
+    provenance = []
+    for source_path, destination_path in RUNTIME_ADDITIONS:
+        safe_path(source_path)
+        safe_path(destination_path)
+        destination = stage / destination_path
+        if destination_path in original_paths or destination.exists():
+            raise RuntimeError('Runtime addition replaces an existing file: ' + destination_path)
+        addition_source = source / source_path
+        if not addition_source.is_file() or addition_source.is_symlink():
+            raise RuntimeError('Pinned commit lacks required runtime addition: ' + source_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(str(addition_source), str(destination))
+        expected_hash = file_info(addition_source)['sha256']
+        if file_info(destination)['sha256'] != expected_hash:
+            raise RuntimeError('Staged runtime addition differs from pinned source: ' + destination_path)
+        provenance.append({
+            'source_path': source_path,
+            'staged_path': destination_path,
+            'source_commit': commit,
+            'addition_sha256': expected_hash,
         })
     return provenance
 
@@ -241,6 +277,9 @@ def main():
     override_provenance = stage_runtime_overrides(
         source, stage, {entry['path'] for entry in reference['files']}, commit,
     )
+    addition_provenance = stage_runtime_additions(
+        source, stage, {entry['path'] for entry in reference['files']}, commit,
+    )
 
     main_file = stage / (SLUG + '.php')
     replace_once(main_file, r'(^ \* Version:\s+)0\.4\.8(?=\s*$)', r'\g<1>' + NEW_VERSION)
@@ -299,6 +338,7 @@ def main():
         'build_assets_before_version_patch': build_assets,
         'staged_build_assets': staged_asset_info,
         'runtime_overrides': override_provenance,
+        'runtime_additions': addition_provenance,
         'packaging_tool_sha256': file_info(source / PACKAGING_TOOL_PATH)['sha256'],
         'offline_validation': {'original_manifest_files': 45, 'frontend_tests_passed': EXPECTED_TEST_COUNT, 'javascript_syntax': 'passed', 'php_syntax': php_syntax, 'commands': ['npm run verify:reference', 'npm test', 'npm run build'], 'build_assets': 'Exact output of pinned commit; registration deliberately differs from older parity build', 'browser_or_live_checks': 'Not run by this packaging tool'},
         'intentional_version_changes': ['Plugin header Version: 0.4.8 -> ' + NEW_VERSION, 'TC_ESTIMATE_VERSION: 0.4.8 -> ' + NEW_VERSION, 'readme Stable tag: 0.4.8 -> ' + NEW_VERSION, 'Worker VERSION/cache suffix: ' + built_worker_version + ' -> ' + NEW_VERSION],
@@ -308,9 +348,9 @@ def main():
     }
     write_json(stage / 'build-provenance.json', provenance)
 
-    allowed = set(entry['path'] for entry in reference['files']) | {'app/dist/estimate-builder.js.map', 'build-provenance.json'}
+    allowed = set(entry['path'] for entry in reference['files']) | {'app/dist/estimate-builder.js.map', 'build-provenance.json'} | {destination for _, destination in RUNTIME_ADDITIONS}
     actual = {str(path.relative_to(stage)) for path in stage.rglob('*') if path.is_file()}
-    if actual != allowed or len(actual) != 47:
+    if actual != allowed:
         raise RuntimeError('Staged runtime allowlist/count mismatch')
     forbidden_components = {'node_modules', 'tests', 'screenshots', '.git', '.env', 'wp-config.php'}
     patterns = {
@@ -345,7 +385,7 @@ def main():
             info.compress_type = zipfile.ZIP_DEFLATED
             package.writestr(info, (stage / relative).read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
     with zipfile.ZipFile(str(archive_path)) as package:
-        if package.testzip() is not None or len(package.infolist()) != 47:
+        if package.testzip() is not None or len(package.infolist()) != len(allowed):
             raise RuntimeError('Candidate ZIP CRC/count failure')
         for entry in package.infolist():
             safe_path(entry.filename)
@@ -366,6 +406,7 @@ def main():
         'php_file_count': sum(relative.endswith('.php') for relative in actual),
         'files': [dict({'path': SLUG + '/' + relative}, **file_info(stage / relative)) for relative in sorted(actual)],
         'runtime_overrides': override_provenance,
+        'runtime_additions': addition_provenance,
         'checks': {'original_manifest': 'passed', 'frontend_tests_passed': EXPECTED_TEST_COUNT, 'pinned_commit_build_hashes_recorded': 'passed', 'staged_assets_match_build': 'passed', 'runtime_overrides_match_pinned_commit': 'passed', 'only_intended_version_deltas': 'passed', 'node_js_syntax': 'passed', 'node_worker_syntax': 'passed', 'php_syntax': php_syntax, 'zip_crc_path_type_allowlist_content': 'passed', 'credential_patterns': 'no findings'},
         'reproducibility': {'fixed_zip_timestamp': list(timestamp), 'python': sys.version.split()[0], 'zlib': zlib.ZLIB_VERSION, 'packaging_tool_sha256': file_info(Path(__file__))['sha256']},
         'conditions': provenance['unverified_conditions'],

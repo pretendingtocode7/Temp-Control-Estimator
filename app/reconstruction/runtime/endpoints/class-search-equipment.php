@@ -38,11 +38,19 @@ final class Search_Equipment extends Endpoint_Base {
 				'limit' => array( 'type' => 'integer', 'required' => false, 'default' => 50 ),
 				'selector' => array( 'type' => 'boolean', 'required' => false, 'default' => false ),
 				'category' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_key', 'enum' => array( 'package', 'ac', 'furnace', 'coil' ) ),
+				'category2' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field', 'enum' => array_merge( array( '' ), Equipment_Catalog::CATEGORY2_VALUES ) ),
 				'btu' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'tons' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'efficiency' => array( 'type' => 'string', 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'page' => array( 'type' => 'integer', 'required' => false, 'default' => 1, 'minimum' => 1 ),
 			),
+		) );
+
+		// Fixed optional proposal items have a separate authenticated lookup.
+		register_rest_route( TC_ESTIMATE_REST_NS, '/equipment/addons', array(
+			'methods' => 'GET',
+			'callback' => array( $this, 'handle_addons' ),
+			'permission_callback' => array( $this, 'permission_check' ),
 		) );
 
 		// Individual item fetch.
@@ -66,6 +74,7 @@ final class Search_Equipment extends Endpoint_Base {
 		if ( true === $request->get_param( 'selector' ) ) {
 			$results = $catalog->search_selector( array(
 				'category' => (string) ( $request->get_param( 'category' ) ?? 'package' ),
+				'category2' => $request->get_param( 'category2' ),
 				'q' => (string) $request->get_param( 'q' ),
 				'brand' => (string) $request->get_param( 'brand' ),
 				'btu' => $request->get_param( 'btu' ),
@@ -100,5 +109,13 @@ final class Search_Equipment extends Endpoint_Base {
 			return $this->fail( $item );
 		}
 		return $this->ok( $item );
+	}
+
+	public function handle_addons( WP_REST_Request $request ) {
+		$limited = Rate_Limiter::instance()->consume( 'equipment' );
+		if ( is_wp_error( $limited ) ) {
+			return $this->fail( $limited );
+		}
+		return $this->ok( Equipment_Catalog::instance()->proposal_addons() );
 	}
 }

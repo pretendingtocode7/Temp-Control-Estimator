@@ -3,6 +3,10 @@ import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ render: vi.fn(), createRoot: vi.fn() }));
 vi.mock("react-dom/client", () => ({ createRoot: mocks.createRoot }));
 vi.mock("../src/App.jsx", () => ({ App: () => null }));
+vi.mock("../src/components/CustomerChoicesPage.jsx", () => ({
+  CustomerChoicesPage: () => null,
+}));
+import { CustomerChoicesPage } from "../src/components/CustomerChoicesPage.jsx";
 let main;
 beforeEach(async () => {
   document.body.innerHTML = "";
@@ -24,6 +28,50 @@ function root(boot) {
   return element;
 }
 describe("WordPress bootstrap compatibility", () => {
+  it("prioritizes the public customer root without staff nonce or service-worker registration", () => {
+    const publicRoot = document.createElement("div");
+    publicRoot.id = "tc-customer-choices-root";
+    publicRoot.dataset.boot = JSON.stringify({
+      restUrl: "/wp-json/tc-estimate/v1",
+      brand: { name: "Fixture HVAC" },
+    });
+    document.body.appendChild(publicRoot);
+    root({ restUrl: "/wp-json/tc-estimate/v1" });
+    const register = vi.fn();
+    vi.stubGlobal("navigator", { serviceWorker: { register } });
+    vi.stubGlobal("isSecureContext", true);
+    const events = vi.spyOn(window, "addEventListener");
+    main.mount();
+    expect(mocks.createRoot).toHaveBeenCalledExactlyOnceWith(publicRoot);
+    const rendered = mocks.render.mock.calls[0][0];
+    const page =
+      rendered.type === React.StrictMode ? rendered.props.children : rendered;
+    expect(page.type).toBe(CustomerChoicesPage);
+    expect(page.props).toEqual({
+      restUrl: "/wp-json/tc-estimate/v1",
+      brand: { name: "Fixture HVAC" },
+    });
+    expect(register).not.toHaveBeenCalled();
+    expect(events.mock.calls.filter(([name]) => name === "load")).toHaveLength(
+      0,
+    );
+  });
+
+  it("does not fall back to staff startup when a public root has no REST URL", () => {
+    const publicRoot = document.createElement("div");
+    publicRoot.id = "tc-customer-choices-root";
+    publicRoot.dataset.boot = JSON.stringify({
+      brand: { name: "Fixture HVAC" },
+    });
+    document.body.appendChild(publicRoot);
+    root({ restUrl: "/wp-json/tc-estimate/v1", nonce: "staff-synthetic" });
+    main.mount();
+    expect(mocks.createRoot).not.toHaveBeenCalled();
+    expect(publicRoot.textContent).toMatch(
+      /not configured|unavailable|could not/i,
+    );
+  });
+
   it("does nothing on unrelated pages", () => {
     main.mount();
     expect(mocks.createRoot).not.toHaveBeenCalled();

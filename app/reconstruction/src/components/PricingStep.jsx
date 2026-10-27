@@ -1,12 +1,150 @@
 /** Reconstructed from the saved v0.4.8 deployment bundle; not recovered original source. */
+import * as React from "react";
+import {
+  formatMoney,
+  hasSystemChoices,
+  sumSelectedSales,
+  systemSalesPrice,
+} from "../lib/utils.js";
+
+const PERMIT_PARAGRAPHS = [
+  "Permit fees are not included in the project total.",
+  "Temp Control will prepare and complete all required permit paperwork and submit the necessary documentation to the local township on the homeowner’s behalf.",
+  "All work will be performed in accordance with local building codes and manufacturer specifications. Permit payment, pickup and scheduling of Inspections are the responsibility of the homeowner.",
+];
+
+function OptionalItems({ api, options, onOptionsChange }) {
+  const [result, setResult] = React.useState({
+    status: "loading",
+    data: null,
+    error: null,
+  });
+  const [attempt, setAttempt] = React.useState(0);
+  React.useEffect(() => {
+    let cancelled = false;
+    setResult({ status: "loading", data: null, error: null });
+    (async () => {
+      try {
+        if (typeof api?.getEquipmentAddons !== "function")
+          throw new Error("Optional items are unavailable.");
+        const data = await api.getEquipmentAddons();
+        if (!cancelled) setResult({ status: "ready", data, error: null });
+      } catch (error) {
+        if (!cancelled)
+          setResult({
+            status: "error",
+            data: null,
+            error: error?.message || "Optional items are unavailable.",
+          });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, attempt]);
+  const available = (key) => {
+    const item = result.data?.[key];
+    return (
+      result.status === "ready" &&
+      item?.available === true &&
+      typeof item.item_id === "string" &&
+      !!item.item_id &&
+      item.rate === 0 &&
+      (item.quantity === undefined || item.quantity === 1) &&
+      (key !== "maintenance" ||
+        (item.renewal_rate === 349 && item.renewal_units === 1))
+    );
+  };
+  return (
+    <fieldset className="tc-fieldset tc-optional-items">
+      <legend>Optional items</legend>
+      {result.status === "loading" && (
+        <p className="tc-field-help" role="status">
+          Loading optional items…
+        </p>
+      )}
+      {result.status === "error" && (
+        <p className="tc-err" role="alert">
+          {result.error}
+        </p>
+      )}
+      <label className="tc-check">
+        <input
+          type="checkbox"
+          aria-label="New Residential System Maintenance Agreement ($0.00)"
+          checked={options.include_maintenance === true}
+          disabled={
+            !available("maintenance") && options.include_maintenance !== true
+          }
+          onChange={(event) => {
+            if (available("maintenance") || event.target.checked === false)
+              onOptionsChange({ include_maintenance: event.target.checked });
+          }}
+        />
+        <span>New Residential System Maintenance Agreement — $0.00</span>
+      </label>
+      <p className="tc-field-help">Renews at $349 for one unit.</p>
+      {result.status === "ready" && !available("maintenance") && (
+        <p className="tc-field-help">
+          The maintenance agreement is unavailable.
+        </p>
+      )}
+      <label className="tc-check">
+        <input
+          type="checkbox"
+          aria-label="Permits & Inspections ($0.00)"
+          checked={options.include_permits === true}
+          disabled={!available("permits") && options.include_permits !== true}
+          onChange={(event) => {
+            if (available("permits") || event.target.checked === false)
+              onOptionsChange({ include_permits: event.target.checked });
+          }}
+        />
+        <span>Permits &amp; Inspections — $0.00</span>
+      </label>
+      {options.include_permits === true && (
+        <div className="tc-permits-disclosure">
+          {PERMIT_PARAGRAPHS.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+      )}
+      {result.status === "ready" && !available("permits") && (
+        <p className="tc-field-help">
+          Permits &amp; Inspections is unavailable.
+        </p>
+      )}
+      {result.status !== "loading" &&
+        (!available("maintenance") || !available("permits")) && (
+          <button
+            type="button"
+            className="tc-btn tc-btn-ghost tc-btn-sm"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Retry optional items
+          </button>
+        )}
+      <p className="tc-field-help">
+        Selected optional items are included once per proposal at $0.00 today. A
+        future maintenance renewal is not added to this project total.
+      </p>
+    </fieldset>
+  );
+}
+
 export function PricingStep({
+  api,
+  systems = [],
   pricing,
   missingCostCount = 0,
   options,
   onPricingChange,
   onOptionsChange,
 }) {
-  const equipmentSalesSubtotal = pricing.subtotal || 0,
+  const choicesMode = hasSystemChoices(systems);
+  const equipmentSalesSubtotal = choicesMode
+      ? sumSelectedSales(systems)
+      : pricing.subtotal || 0,
     updateRebate = (rebateIndex, changes) => {
       const rebates = (options.rebates || []).map((rebate, currentIndex) =>
         currentIndex === rebateIndex
@@ -49,6 +187,39 @@ export function PricingStep({
           "Equipment subtotal is your purchase cost. Project total is the sales price charged to the customer. You can edit either amount."
         }
       </p>
+      {choicesMode && (
+        <fieldset className="tc-fieldset tc-alternative-prices">
+          <legend>Alternative sales prices</legend>
+          {systems.map((system) => (
+            <div key={system.system_id || system.system_number}>
+              <h3 className="tc-alternative-system-label">
+                {system.system_label}
+              </h3>
+              <ul>
+                {Array.isArray(system.choices) ? (
+                  system.choices.map((choice) => (
+                    <li key={choice.choice_id}>
+                      {choice.label}: {formatMoney(choice.sales_price)}
+                      {choice.choice_id === system.selected_choice_id
+                        ? " (Selected)"
+                        : ""}
+                    </li>
+                  ))
+                ) : (
+                  <li>
+                    Current selection: {formatMoney(systemSalesPrice(system))}{" "}
+                    (Selected)
+                  </li>
+                )}
+              </ul>
+            </div>
+          ))}
+          <p className="tc-field-help">
+            Only the selected alternative for each physical system contributes
+            to the project total. Internal purchase costs are separate.
+          </p>
+        </fieldset>
+      )}
       <div className="tc-field-grid">
         <label className="tc-field">
           <span className="tc-field-label">Equipment subtotal (cost)</span>
@@ -84,6 +255,12 @@ export function PricingStep({
                 : "Enter the equipment cost manually."}
             </span>
           )}
+          {choicesMode && pricing.equipment_cost_manual && (
+            <span className="tc-cost-warning tc-field-help" role="note">
+              A manual equipment cost override is in place. It will not change
+              when you select a different alternative.
+            </span>
+          )}
         </label>
         <label className="tc-field">
           <span className="tc-field-label">Project total</span>
@@ -112,12 +289,16 @@ export function PricingStep({
               })
             }
           >
-            Use equipment sales price
+            {choicesMode
+              ? "Use selected alternatives price"
+              : "Use equipment sales price"}
           </button>
           <span className="tc-field-note">
-            {pricing.total_manual
-              ? "Manual sales price; equipment and rebate changes will not replace it."
-              : "Starts from selected equipment sales prices. Add labor, discounts or other charges as needed."}
+            {choicesMode
+              ? `Selected alternatives plus a shared adjustment of ${formatMoney(pricing.project_adjustment || 0)}, applied once. Editing this total changes the shared adjustment.`
+              : pricing.total_manual
+                ? "Manual sales price; equipment and rebate changes will not replace it."
+                : "Starts from selected equipment sales prices. Add labor, discounts or other charges as needed."}
           </span>
         </label>
         <label className="tc-field">
@@ -138,6 +319,11 @@ export function PricingStep({
           />
         </label>
       </div>
+      <OptionalItems
+        api={api}
+        options={options}
+        onOptionsChange={onOptionsChange}
+      />
       <fieldset className="tc-fieldset">
         <legend>{"Proposal notes"}</legend>
         <label className="tc-check">

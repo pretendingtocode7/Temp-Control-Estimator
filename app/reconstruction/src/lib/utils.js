@@ -28,10 +28,41 @@ export function formatMoney(amount) {
     maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0);
 }
+export function hasSystemChoices(systems) {
+  return (systems || []).some((system) => Array.isArray(system.choices));
+}
+export function selectedChoice(system) {
+  return Array.isArray(system?.choices)
+    ? system.choices.find(
+        (choice) => choice.choice_id === system.selected_choice_id,
+      ) || null
+    : null;
+}
+export function selectedEquipment(system) {
+  // Once alternatives exist, a stale legacy equipment mirror is never used.
+  return Array.isArray(system?.choices)
+    ? selectedChoice(system)?.equipment || {}
+    : system?.equipment || {};
+}
+export function systemSalesPrice(system) {
+  if (!Array.isArray(system?.choices)) return sumEquipment([system]);
+  const price = selectedChoice(system)?.sales_price;
+  return Number.isFinite(price) && price >= 0 ? price : 0;
+}
+export function sumSelectedSales(systems) {
+  return (
+    Math.round(
+      (systems || []).reduce(
+        (sum, system) => sum + systemSalesPrice(system),
+        0,
+      ) * 100,
+    ) / 100
+  );
+}
 export function sumEquipment(systems) {
   let subtotal = 0;
   for (const system of systems || []) {
-    for (const item of Object.values(system.equipment || {})) {
+    for (const item of Object.values(selectedEquipment(system))) {
       if (item && Number.isFinite(item.rate)) subtotal += item.rate;
     }
   }
@@ -43,7 +74,7 @@ export function equipmentCostSummary(systems) {
   let missingCount = 0;
   let selectedCount = 0;
   for (const system of systems || []) {
-    for (const item of Object.values(system.equipment || {})) {
+    for (const item of Object.values(selectedEquipment(system))) {
       if (!item) continue;
       selectedCount += 1;
       if (Number.isFinite(item.purchase_cost) && item.purchase_cost >= 0)

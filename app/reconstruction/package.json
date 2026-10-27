@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:parity": "playwright test",
     "test:selector": "playwright test --config=playwright.selector.config.js",
+    "test:options": "playwright test --config=playwright.options.config.js",
     "format": "prettier --write src tests vite.config.js playwright.config.js",
     "verify:reference": "node tools/verify-reference.mjs"
   },

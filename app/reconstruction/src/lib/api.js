@@ -209,6 +209,16 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
   }
 
   return {
+    createCustomerChoiceLink(estimateId) {
+      return request("POST", "/customer-choices/link", {
+        body: { estimate_id: estimateId },
+      });
+    },
+    revokeCustomerChoiceLink(estimateId) {
+      return request("POST", "/customer-choices/revoke", {
+        body: { estimate_id: estimateId },
+      });
+    },
     searchCustomers(query, limit = 20) {
       return requestWithReadRetry("GET", "/customers", {
         query: { q: query, limit },
@@ -246,6 +256,7 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
       btu,
       tons,
       efficiency,
+      category2,
       page = 1,
       limit = 50,
     } = {}) {
@@ -258,6 +269,7 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
             btu,
             tons,
             efficiency,
+            category2,
             page,
             limit,
           },
@@ -265,6 +277,10 @@ export function createApi({ restUrl, nonce, ajaxUrl }) {
       return catalogWarmupPromise
         ? catalogWarmupPromise.catch(() => null).then(search)
         : search();
+    },
+
+    getEquipmentAddons() {
+      return requestWithReadRetry("GET", "/equipment/addons");
     },
 
     listTemplates(type) {

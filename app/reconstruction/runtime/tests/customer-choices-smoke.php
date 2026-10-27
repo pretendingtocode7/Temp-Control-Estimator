@@ -22,6 +22,7 @@ namespace {
 	$GLOBALS['cc_revoke_inflight'] = null;
 	$GLOBALS['cc_customer_override'] = null;
 	$GLOBALS['cc_single_attempts'] = array();
+	$GLOBALS['cc_customer_reads'] = 0;
 	function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['cc_options'][ $key ] ?? $default; }
 	function add_option( string $key, mixed $value, mixed $deprecated = '', mixed $autoload = false ): bool {
 		if ( array_key_exists( $key, $GLOBALS['cc_options'] ) ) { return false; }
@@ -43,9 +44,9 @@ namespace {
 	function get_userdata( int $id ): object|false { return 1 === $id ? (object) array( 'ID' => 1, 'roles' => array( 'administrator' ) ) : false; }
 	function wp_doing_cron(): bool { return $GLOBALS['cc_cron']; }
 	function wp_salt( string $scheme = 'auth' ): string { return 'synthetic-customer-choice-test-salt-not-a-live-secret-' . $scheme; }
-	function home_url( string $path = '' ): string { return 'https://fixture.example.test' . $path; }
+	function home_url( string $path = '' ): string { return ( $GLOBALS['cc_home_url'] ?? 'https://fixture.example.test' ) . $path; }
 	function site_url( string $path = '' ): string { return home_url( $path ); }
-	function rest_url( string $path = '' ): string { return home_url( '/wp-json/' . $path ); }
+	function rest_url( string $path = '' ): string { $GLOBALS['cc_rest_url_reads']++; return $GLOBALS['cc_rest_url'] ?? home_url( '/wp-json/' . $path ); }
 	function wp_parse_url( string $url, int $component = -1 ): mixed { return parse_url( $url, $component ); }
 	function maybe_serialize( mixed $value ): mixed { return is_array( $value ) || is_object( $value ) ? serialize( $value ) : $value; }
 	function wp_cache_delete( string $key, string $group = '' ): bool { return true; }
@@ -105,6 +106,7 @@ namespace TempControl\Estimate {
 	final class Customer_Search {
 		public static function instance(): self { static $self; return $self ??= new self(); }
 		public function get_account( string $id ): array|\WP_Error {
+			$GLOBALS['cc_customer_reads']++;
 			return '200000000000000001' === $id ? ( $GLOBALS['cc_customer_override'] ?? array( 'id' => $id, 'books_contact_id' => '300000000000000001', 'name' => 'Fixture Customer', 'email' => 'fixture@example.test' ) ) : new \WP_Error( 'fixture_customer_missing', 'Synthetic customer unavailable.' );
 		}
 	}
@@ -258,10 +260,11 @@ namespace {
 		return $body;
 	}
 	function cc_reset(): array {
+		$GLOBALS['cc_home_url'] = 'https://fixture.example.test'; $GLOBALS['cc_rest_url'] = null; $GLOBALS['cc_rest_url_reads'] = 0;
 		$GLOBALS['cc_options'] = array( 'tc_estimate_zoho_org_id' => '600000000000000001', 'tc_estimate_zoho_dc' => 'com', 'home' => 'https://fixture.example.test', 'siteurl' => 'https://fixture.example.test' );
 		$GLOBALS['cc_time'] = time(); $GLOBALS['cc_transients'] = array(); $GLOBALS['cc_user'] = 1; $GLOBALS['cc_owner_allowed'] = true; $GLOBALS['cc_cron'] = false;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.1'; $_SERVER['HTTP_ORIGIN'] = 'https://fixture.example.test';
-		$api = Zoho_API::instance(); $api->calls = array(); $api->books_mode = 'success'; $api->crm_fail = false; $api->books_get_fail = false; $api->crm_get_fail = false; $api->crm_missing = false; $api->crm_mode = 'success'; $api->revoke_during_books_put = false; $GLOBALS['cc_revoke_inflight'] = null; $api->replace_lock_during_books_put = false; $GLOBALS['cc_customer_override'] = null; $GLOBALS['cc_single_attempts'] = array(); $api->contacts = array( array( 'contact_id' => '300000000000000001', 'email' => 'fixture@example.test', 'status' => 'active' ) ); $api->contacts_more = false; $api->crm_drop_fields_after_write = array();
+		$api = Zoho_API::instance(); $api->calls = array(); $api->books_mode = 'success'; $api->crm_fail = false; $api->books_get_fail = false; $api->crm_get_fail = false; $api->crm_missing = false; $api->crm_mode = 'success'; $api->revoke_during_books_put = false; $GLOBALS['cc_revoke_inflight'] = null; $api->replace_lock_during_books_put = false; $GLOBALS['cc_customer_override'] = null; $GLOBALS['cc_single_attempts'] = array(); $GLOBALS['cc_customer_reads'] = 0; $api->contacts = array( array( 'contact_id' => '300000000000000001', 'email' => 'fixture@example.test', 'status' => 'active' ) ); $api->contacts_more = false; $api->crm_drop_fields_after_write = array();
 		$GLOBALS['cc_persist_fail'] = ''; $GLOBALS['cc_provider_pending'] = null;
 		Audit_Log::instance()->records = array();
 		foreach ( array( Customer_Choices::class, Equipment_Catalog::class ) as $class ) {
@@ -302,7 +305,9 @@ namespace {
 	cc_case( 'Owned alternatives estimate gets a private scoped expiring fragment link', function (): void {
 		cc_reset(); $link = cc_link(); $token = cc_token( $link );
 		cc_check( preg_match( '/^[a-f0-9]{32}\.[a-f0-9]{64}$/D', $token ) === 1, 'Scoped high-entropy token shape.' );
-		cc_same( 'https://fixture.example.test', preg_replace( '~(/\?.*)$~', '', $link['url'] ), 'Configured site origin is used.' );
+		cc_same( 'https', parse_url( $link['url'], PHP_URL_SCHEME ), 'Canonical selection link uses HTTPS.' );
+		cc_same( 'fixture.example.test', parse_url( $link['url'], PHP_URL_HOST ), 'Configured site origin is used.' );
+		cc_same( '/wp-json/tc-estimate/v1/customer-choices/page', parse_url( $link['url'], PHP_URL_PATH ), 'Selection link is canonical under the configured REST namespace, away from the root homepage.' );
 		$query = array(); parse_str( (string) parse_url( $link['url'], PHP_URL_QUERY ), $query );
 		cc_same( array( 'tc_estimate_choices' => '1', 'ver' => TC_ESTIMATE_VERSION ), $query, 'Cache compatibility query contains only the route marker and current plugin version.' );
 		cc_same( 'token=' . $token, (string) parse_url( $link['url'], PHP_URL_FRAGMENT ), 'Scoped credential remains entirely in the fragment.' );
@@ -311,7 +316,7 @@ namespace {
 		$record = $GLOBALS['cc_options'][ cc_record_key() ];
 		cc_check( $record['expires_at'] > time() && $record['expires_at'] <= time() + 30 * DAY_IN_SECONDS, 'Link expiry is bounded.' );
 		cc_check( ! str_contains( (string) json_encode( $record ), $token ), 'Raw bearer token is not persisted.' );
-		cc_same( 0, count( cc_writes() ), 'Link preparation does not update Books.' );
+		cc_same( 0, count( cc_writes() ), 'Link preparation does not update Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'Canonical URL preparation adds no CRM mutation.' );
 	});
 	cc_case( 'Retrieving the same staff link preserves version query token expiry and revision without writes', function (): void {
 		cc_reset(); $first = cc_link(); $record = $GLOBALS['cc_options'][ cc_record_key() ]; $count = count( $GLOBALS['cc_options'] );
@@ -319,6 +324,69 @@ namespace {
 		cc_same( cc_token( $first ), cc_token( $second ), 'Cache version does not rotate the scoped credential.' ); cc_same( $record, $GLOBALS['cc_options'][ cc_record_key() ], 'Link retrieval preserves quoted prices pending state signature and TTL.' ); cc_same( $count, count( $GLOBALS['cc_options'] ), 'Link retrieval creates no second record.' );
 		$query = array(); parse_str( (string) parse_url( $second['url'], PHP_URL_QUERY ), $query ); cc_same( TC_ESTIMATE_VERSION, $query['ver'] ?? null, 'Reused link carries current version marker.' );
 		cc_same( 0, count( cc_writes() ), 'No Books update while retrieving link.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No CRM update while retrieving link.' );
+	});
+
+	cc_case( 'Deployment hold blocks new alternative links before customer provider or record access', function (): void {
+		cc_reset(); $GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true; $before = $GLOBALS['cc_options'];
+		cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ), 503 ); cc_same( 0, $GLOBALS['cc_customer_reads'], 'No customer resolution under hold.' ); cc_same( array(), Zoho_API::instance()->calls, 'No provider reads or writes under hold.' ); cc_same( $before, $GLOBALS['cc_options'], 'Hold creates no link record or index.' ); cc_same( array(), $GLOBALS['cc_transients'], 'Hold consumes no rate-limit state.' ); cc_same( 0, $GLOBALS['cc_rest_url_reads'], 'Hold resolves no link address.' );
+	});
+	foreach ( array(
+		'external origin' => 'https://external.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'protocol relative' => '//fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'HTTP scheme' => 'http://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'invalid port' => 'https://fixture.example.test:65536/wp-json/tc-estimate/v1/customer-choices/page',
+		'nonmatching port' => 'https://fixture.example.test:444/wp-json/tc-estimate/v1/customer-choices/page',
+		'userinfo' => 'https://operator@fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'password' => 'https://operator:password@fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'query string' => 'https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page?other=1',
+		'plain query REST routing' => 'https://fixture.example.test/?rest_route=/tc-estimate/v1/customer-choices/page',
+		'empty query delimiter' => 'https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page?',
+		'empty fragment delimiter' => 'https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page#',
+		'fragment' => 'https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page#other',
+		'literal control' => "https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page\n",
+		'encoded control' => 'https://fixture.example.test/wp-json/tc-estimate/v1/customer-choices/page%0a',
+		'backslash ambiguity' => 'https://fixture.example.test\\@external.example.test/wp-json/tc-estimate/v1/customer-choices/page',
+		'non-page path' => 'https://fixture.example.test/',
+	) as $description => $url ) {
+		cc_case( 'Unsafe canonical URL ' . $description . ' fails before customer/provider work or record creation', function () use ( $url ): void {
+			cc_reset(); $GLOBALS['cc_rest_url'] = $url; $before = $GLOBALS['cc_options'];
+			cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ), 503 );
+			cc_same( $before, $GLOBALS['cc_options'], 'Unsafe URL creates no private record or index.' ); cc_same( array(), $GLOBALS['cc_transients'], 'Unsafe URL writes no transient state.' ); cc_same( 0, $GLOBALS['cc_customer_reads'], 'Unsafe URL resolves no customer.' ); cc_same( array(), Zoho_API::instance()->calls, 'Unsafe URL makes no provider call.' ); cc_same( 1, $GLOBALS['cc_rest_url_reads'], 'Canonical address is resolved once.' );
+		} );
+	}
+	cc_case( 'A valid configured subsite custom REST prefix is used once for new and reused links', function (): void {
+		cc_reset(); $GLOBALS['cc_home_url'] = 'https://fixture.example.test/subsite';
+		$GLOBALS['cc_rest_url'] = 'https://fixture.example.test:443/subsite/custom-api/tc-estimate/v1/customer-choices/page';
+		$link = cc_link(); cc_same( $GLOBALS['cc_rest_url'] . '?tc_estimate_choices=1&ver=' . rawurlencode( TC_ESTIMATE_VERSION ) . '#token=' . cc_token( $link ), $link['url'], 'Configured REST prefix and equivalent default HTTPS port are preserved.' ); cc_same( 1, $GLOBALS['cc_rest_url_reads'], 'One canonical resolution on new link.' );
+		cc_same( $link, cc_link(), 'Reused link retains canonical configured address and original bearer.' ); cc_same( 2, $GLOBALS['cc_rest_url_reads'], 'Exactly one canonical resolution per reuse request.' );
+	});
+	cc_case( 'A changed unsafe canonical URL blocks link reuse before provider work', function (): void {
+		cc_reset(); cc_link(); $GLOBALS['cc_rest_url'] = 'https://external.example.test/wp-json/tc-estimate/v1/customer-choices/page'; $before = $GLOBALS['cc_options']; Zoho_API::instance()->calls = array(); $GLOBALS['cc_customer_reads'] = 0;
+		cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ), 503 ); cc_same( $before, $GLOBALS['cc_options'], 'Original issued private record and index stay unchanged.' ); cc_same( 0, $GLOBALS['cc_customer_reads'], 'Reusing unsafe URL resolves no customer.' ); cc_same( array(), Zoho_API::instance()->calls, 'Reusing unsafe URL makes no provider call.' );
+	});
+	cc_case( 'Deployment hold leaves legacy no-alternatives quotes unavailable without customer or provider work', function (): void {
+		$body = cc_reset(); unset( $body['_proposal_systems'] ); Audit_Log::instance()->generate['payload'] = json_encode( $body ); $GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true;
+		$result = Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ); cc_same( array( 'available' => false ), $result, 'Legacy behavior remains unchanged while held.' ); cc_same( 0, $GLOBALS['cc_customer_reads'], 'No customer lookup for legacy quote.' ); cc_same( array(), Zoho_API::instance()->calls, 'No provider calls for legacy quote.' ); cc_same( 0, $GLOBALS['cc_rest_url_reads'], 'Legacy quote resolves no link address.' );
+	});
+	cc_case( 'Deployment hold rejects valid token view and apply without mutating local state or providers', function (): void {
+		cc_reset(); $token = cc_token( cc_link() ); $GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true; $before = $GLOBALS['cc_options']; $rates = $GLOBALS['cc_transients']; Zoho_API::instance()->calls = array(); $GLOBALS['cc_customer_reads'] = 0;
+		cc_error( Customer_Choices::instance()->view( $token ), 503 ); cc_error( cc_apply( $token ), 503 ); cc_same( $before, $GLOBALS['cc_options'], 'All quote signature pricing revision pending and expiry fields remain untouched.' ); cc_same( $rates, $GLOBALS['cc_transients'], 'No rate-limit writes while held.' ); cc_same( array(), Zoho_API::instance()->calls, 'No provider calls while held.' ); cc_same( 0, $GLOBALS['cc_customer_reads'], 'No customer lookup while held.' );
+	});
+	cc_case( 'Invalid token remains401 during deployment hold without revealing hold availability', function (): void {
+		cc_reset(); $token = cc_token( cc_link() ); $GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true; Zoho_API::instance()->calls = array();
+		$last = substr( $token, -1 ); $tampered = substr( $token, 0, -1 ) . ( 'a' === $last ? 'b' : 'a' );
+		foreach ( array( '', 'not-a-token', $tampered, str_repeat( '0', 32 ) . '.' . str_repeat( 'a', 64 ) ) as $invalid ) { cc_error( Customer_Choices::instance()->view( $invalid ), 401 ); cc_error( cc_apply( $invalid ), 401 ); }
+		cc_same( array(), Zoho_API::instance()->calls, 'Invalid held credentials cannot reach providers.' );
+	});
+	cc_case( 'Expired token remains401 during deployment hold', function (): void {
+		cc_reset(); $token = cc_token( cc_link() ); $GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true; $GLOBALS['cc_time'] += 31 * DAY_IN_SECONDS; Zoho_API::instance()->calls = array();
+		cc_error( Customer_Choices::instance()->view( $token ), 401 ); cc_error( cc_apply( $token ), 401 ); cc_same( array(), Zoho_API::instance()->calls, 'Expired held credentials cannot reach providers.' );
+	});
+	cc_case( 'Releasing deployment hold restores the same valid token quote state and normal selected update', function (): void {
+		cc_reset(); $link = cc_link(); $token = cc_token( $link ); $key = cc_record_key(); $record = $GLOBALS['cc_options'][ $key ]; $before = Customer_Choices::instance()->view( $token );
+		$GLOBALS['cc_options']['tc_estimate_customer_choices_deployment_hold'] = true; cc_error( Customer_Choices::instance()->view( $token ), 503 ); cc_error( cc_apply( $token ), 503 );
+		delete_option( 'tc_estimate_customer_choices_deployment_hold' ); $after = Customer_Choices::instance()->view( $token ); cc_same( $before, $after, 'Same unconsumed link restores its original public choices revision and expiry.' ); cc_same( $record, $GLOBALS['cc_options'][ $key ], 'Hold never rotates HMAC token or quoted state.' ); cc_same( $link, cc_link(), 'Staff retrieves the identical original link after release.' );
+		$result = cc_apply( $token ); cc_check( is_array( $result ) && 'saved' === ( $result['state'] ?? '' ), 'Same valid token can complete its normal confirmed workflow after release.' ); cc_same( 25500.0, (float) $result['total'], 'Unchanged quoted retail combination applies.' ); cc_same( 1, count( cc_writes() ), 'One existing Books update after release.' ); cc_same( 1, count( cc_writes( 'crm' ) ), 'One paired CRM update after release.' );
 	});
 
 	cc_case( 'Public view exposes only customer quote choices and has no approval URL before confirmation', function (): void {
@@ -834,6 +902,10 @@ namespace {
 	}
 	cc_case( 'All customer-choice routes are POST-only with explicit permission callbacks', function (): void {
 		cc_reset(); $GLOBALS['cc_routes'] = array(); cc_endpoint()->register();
+		// The canonical URL is handled by the existing early-init query shell, not a new REST/business route.
+		// WordPress core's inactive/missing-route response remains a separate host/framework check.
+		cc_same( 4, count( $GLOBALS['cc_routes'] ), 'Only the four existing customer-choice REST operations are registered.' );
+		cc_check( ! isset( $GLOBALS['cc_routes']['/customer-choices/page'] ), 'No page REST handler or new business action is registered.' );
 		foreach ( array( 'link', 'revoke', 'view', 'apply' ) as $action ) {
 			$route = $GLOBALS['cc_routes'][ '/customer-choices/' . $action ] ?? array();
 			cc_same( 'POST', $route['methods'] ?? '', 'GET/HEAD scanners cannot invoke ' . $action ); cc_check( is_callable( $route['permission_callback'] ?? null ), 'Explicit permission gate.' );

@@ -27,6 +27,9 @@ final class Customer_Choices {
 		if ( strlen( $payload_json ) > self::MAX_BYTES ) { return $this->error( 'unavailable', 400 ); }
 		$source = json_decode( $payload_json, true );
 		if ( ! is_array( $source ) || ! $this->has_choices( $source['_proposal_systems'] ?? array() ) ) { return array( 'available' => false ); }
+		if ( get_option( 'tc_estimate_customer_choices_deployment_hold', false ) ) { return $this->error( 'unavailable', 503 ); }
+		$page_url = $this->canonical_page_url();
+		if ( is_wp_error( $page_url ) ) { return $page_url; }
 		$source_hash = hash( 'sha256', $payload_json );
 		$customer_id = $this->customer_id_from_row( $row );
 		if ( is_wp_error( $customer_id ) ) { return $customer_id; }
@@ -41,7 +44,7 @@ final class Customer_Choices {
 				$deal = $this->get_deal( $existing );
 				if ( is_wp_error( $deal ) ) { return $deal; }
 				if ( ! $this->crm_baseline_matches( $deal, $existing ) ) { return $this->error( 'changed', 409 ); }
-				return $this->link_response( $existing );
+				return $this->link_response( $existing, $page_url );
 			}
 			// Expired/revoked links are never silently replaced by a retry.
 			return $this->error( 'unavailable', 409 );
@@ -109,7 +112,7 @@ final class Customer_Choices {
 			delete_option( self::PREFIX . $id );
 			return $this->error( 'in_flight', 409 );
 		}
-		return $this->link_response( $record );
+		return $this->link_response( $record, $page_url );
 	}
 
 	public function revoke_for_estimate( string $estimate_id, int $owner ): array|WP_Error {
@@ -353,11 +356,27 @@ final class Customer_Choices {
 		if ( ! preg_match( '/^([a-f0-9]{32})\.([a-f0-9]{64})$/D', $token, $match ) ) { return $this->error( 'unavailable', 401 ); }
 		$record = get_option( self::PREFIX . $match[1], null );
 		if ( ! is_array( $record ) || ! $this->record_allowed( $record ) || ! hash_equals( (string) $record['signature_hash'], hash( 'sha256', $match[2] ) ) || ! hash_equals( $this->signature( $record ), $match[2] ) ) { return $this->error( 'unavailable', 401 ); }
+		if ( get_option( 'tc_estimate_customer_choices_deployment_hold', false ) ) { return $this->error( 'unavailable', 503 ); }
 		return $record;
 	}
 	private function record_allowed( array $r ): bool { return isset( $r['id'], $r['owner_id'], $r['org_id'], $r['estimate_id'], $r['expires_at'], $r['source_hash'], $r['signature_hash'] ) && empty( $r['revoked'] ) && (int) $r['expires_at'] > time() && hash_equals( (string) $r['org_id'], $this->org() ) && $this->owner_allowed( (int) $r['owner_id'] ); }
 	private function signature( array $r ): string { return hash_hmac( 'sha256', implode( '|', array( 'tc-estimate-choices-v1', $r['id'], $r['owner_id'], $r['org_id'], $r['estimate_id'], $r['expires_at'], $r['source_hash'] ) ), wp_salt( 'auth' ) ); }
-	private function link_response( array $r ): array { return array( 'available' => true, 'url' => home_url( '/?tc_estimate_choices=1&ver=' . rawurlencode( TC_ESTIMATE_VERSION ) ) . '#token=' . $r['id'] . '.' . $this->signature( $r ), 'expires_at' => (int) $r['expires_at'], 'revision' => (int) $r['revision'] ); }
+	/** Never email a bearer through a filtered external, credentialed or query-routed REST URL. */
+	private function canonical_page_url(): string|WP_Error {
+		$route = TC_ESTIMATE_REST_NS . '/customer-choices/page';
+		$url = rest_url( $route );
+		$home = home_url( '/' );
+		$parsed = array();
+		foreach ( array( $url, $home ) as $value ) {
+			if ( '' === $value || preg_match( '/[\x00-\x20\x7f]/', $value ) || str_contains( $value, '\\' ) || preg_match( '/%(?:0[0-9a-f]|1[0-9a-f]|7f)/i', $value ) ) { return $this->error( 'unavailable', 503 ); }
+			$parts = wp_parse_url( $value );
+			if ( ! is_array( $parts ) || 'https' !== strtolower( (string) ( $parts['scheme'] ?? '' ) ) || empty( $parts['host'] ) || isset( $parts['user'] ) || isset( $parts['pass'] ) || array_key_exists( 'query', $parts ) || array_key_exists( 'fragment', $parts ) || ! str_starts_with( (string) ( $parts['path'] ?? '' ), '/' ) ) { return $this->error( 'unavailable', 503 ); }
+			$parsed[] = $parts;
+		}
+		if ( strtolower( $parsed[0]['host'] ) !== strtolower( $parsed[1]['host'] ) || (int) ( $parsed[0]['port'] ?? 443 ) !== (int) ( $parsed[1]['port'] ?? 443 ) || ! str_ends_with( $parsed[0]['path'], '/' . $route ) ) { return $this->error( 'unavailable', 503 ); }
+		return $url;
+	}
+	private function link_response( array $r, string $page_url ): array { return array( 'available' => true, 'url' => $page_url . '?tc_estimate_choices=1&ver=' . rawurlencode( TC_ESTIMATE_VERSION ) . '#token=' . $r['id'] . '.' . $this->signature( $r ), 'expires_at' => (int) $r['expires_at'], 'revision' => (int) $r['revision'] ); }
 	private function owner_allowed( int $owner ): bool { return $owner > 0 && get_userdata( $owner ) && ( user_can( $owner, TC_ESTIMATE_CAP ) || user_can( $owner, 'manage_options' ) ); }
 	private function org(): string { $org = trim( (string) get_option( 'tc_estimate_zoho_org_id', '' ) ); return preg_match( '/^[0-9]{5,20}$/D', $org ) ? $org : ''; }
 	private function valid_id( string $id ): bool { return 1 === preg_match( '/^[0-9]{15,20}$/D', $id ); }

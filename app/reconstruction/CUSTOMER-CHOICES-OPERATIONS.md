@@ -4,6 +4,14 @@ This flow updates an existing draft or sent Books estimate after the homeowner e
 
 The comparison PDF prepared or sent earlier is a fixed document. Customer selection does not regenerate that PDF or resend email; the verified Books estimate is the authoritative selected equipment and total after the update.
 
+## Public chooser delivery
+
+Only `tc_estimate_choices=1` is handled at `init` priority `-9999`, before later template/enqueue hooks. Other requests retain their normal WordPress lifecycle. The response does not render theme hooks, remove global hooks, or clear output buffers. GET and HEAD receive the same restrictive CSP, no-referrer and no-store headers; HEAD has no body. `no-transform` is an advisory cache directive, not proof that a host or edge service will omit injected content.
+
+The only permitted script source is the exact same-origin HTTPS compiled estimator bundle path. Its script tag carries a SHA-384 integrity value computed from the installed local file. Missing, unreadable or unhashable bundle files, or an invalid asset origin, fail closed with a generic 503 response and no customer boot data. Inline script handlers, frames and workers are blocked explicitly. The generic shell contains no customer information, bearer, staff nonce or service-worker registration.
+
+Origin and edge delivery still require verification: inspect the actual anonymous response headers, browser CSP enforcement, loaded script integrity and request initiators without using a valid customer token. A response transform or prestarted output buffer can outlive an early WordPress hook. If an injected script remains, identify its vendor and use a supported per-response exclusion where needed; do not disable global hosting/security controls or assume that `no-transform` alone isolates this page.
+
 ## Provider and quote requirements
 
 The successful owner-bound generate audit must contain the complete offered systems. The original CRM account must independently resolve to exactly one active Books contact; the current quote must have that contact. A unique exact-email Books lookup is used when the CRM customer adapter has no explicit Books contact ID. The related CRM Deal must retain the original account and `Books_Estimate_ID`, its original amount, and identifiable `Quoted_Equipment` rows with stable row IDs. Independent edits to owned financial or equipment fields require staff review. Description-only Books edits are preserved when the same physical choice remains selected.

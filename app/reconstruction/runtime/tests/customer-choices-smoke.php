@@ -130,6 +130,7 @@ namespace TempControl\Estimate {
 		public bool $replace_lock_during_books_put = false;
 		public array $contacts = array();
 		public bool $contacts_more = false;
+		public array $crm_drop_fields_after_write = array();
 		public static function instance(): self { static $self; return $self ??= new self(); }
 		public function get( string $service, string $path, array $query = array() ): array|\WP_Error {
 			$this->calls[] = array( 'method' => 'GET', 'service' => $service, 'path' => $path, 'query' => $query );
@@ -176,6 +177,7 @@ namespace TempControl\Estimate {
 					}
 					$this->deal['Quoted_Equipment'] = $rows;
 				}
+				foreach ( $this->deal['Quoted_Equipment'] as &$after_row ) { foreach ( $this->crm_drop_fields_after_write as $field ) { unset( $after_row[ $field ] ); } } unset( $after_row );
 				return 'timeout-after' === $this->crm_mode ? new \WP_Error( 'fixture_crm_timeout', 'Synthetic CRM write timeout.' ) : array( 'data' => array( array( 'code' => 'SUCCESS', 'status' => 'success' ) ) );
 			}
 			throw new \LogicException( 'Unexpected synthetic PUT target.' );
@@ -259,7 +261,7 @@ namespace {
 		$GLOBALS['cc_options'] = array( 'tc_estimate_zoho_org_id' => '600000000000000001', 'tc_estimate_zoho_dc' => 'com', 'home' => 'https://fixture.example.test', 'siteurl' => 'https://fixture.example.test' );
 		$GLOBALS['cc_time'] = time(); $GLOBALS['cc_transients'] = array(); $GLOBALS['cc_user'] = 1; $GLOBALS['cc_owner_allowed'] = true; $GLOBALS['cc_cron'] = false;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.1'; $_SERVER['HTTP_ORIGIN'] = 'https://fixture.example.test';
-		$api = Zoho_API::instance(); $api->calls = array(); $api->books_mode = 'success'; $api->crm_fail = false; $api->books_get_fail = false; $api->crm_get_fail = false; $api->crm_missing = false; $api->crm_mode = 'success'; $api->revoke_during_books_put = false; $GLOBALS['cc_revoke_inflight'] = null; $api->replace_lock_during_books_put = false; $GLOBALS['cc_customer_override'] = null; $GLOBALS['cc_single_attempts'] = array(); $api->contacts = array( array( 'contact_id' => '300000000000000001', 'email' => 'fixture@example.test', 'status' => 'active' ) ); $api->contacts_more = false;
+		$api = Zoho_API::instance(); $api->calls = array(); $api->books_mode = 'success'; $api->crm_fail = false; $api->books_get_fail = false; $api->crm_get_fail = false; $api->crm_missing = false; $api->crm_mode = 'success'; $api->revoke_during_books_put = false; $GLOBALS['cc_revoke_inflight'] = null; $api->replace_lock_during_books_put = false; $GLOBALS['cc_customer_override'] = null; $GLOBALS['cc_single_attempts'] = array(); $api->contacts = array( array( 'contact_id' => '300000000000000001', 'email' => 'fixture@example.test', 'status' => 'active' ) ); $api->contacts_more = false; $api->crm_drop_fields_after_write = array();
 		$GLOBALS['cc_persist_fail'] = ''; $GLOBALS['cc_provider_pending'] = null;
 		Audit_Log::instance()->records = array();
 		foreach ( array( Customer_Choices::class, Equipment_Catalog::class ) as $class ) {
@@ -720,6 +722,89 @@ namespace {
 		cc_reset(); cc_same_item_new_scope_offer(); $token = cc_token( cc_link() ); Zoho_API::instance()->books_mode = 'timeout-before'; $selection = cc_selections( 'gold', 'silver' );
 		cc_apply( $token, 1, 'fixture-scope-000001', $selection ); $result = cc_apply( $token, 1, 'fixture-scope-000001', $selection );
 		cc_check( is_array( $result ) && 'pending' === ( $result['state'] ?? '' ), 'Financial equality alone cannot confirm a changed scope.' ); cc_same( 1, count( cc_writes() ), 'Unknown scope update never blindly repeats.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No CRM success before Books scope is verified.' );
+	});
+
+	function cc_sparse_crm( bool $populated = false ): void {
+		$api = Zoho_API::instance();
+		foreach ( array( 0, 1 ) as $index ) {
+			$original = $api->deal['Quoted_Equipment'][ $index ];
+			$api->deal['Quoted_Equipment'][ $index ] = array_intersect_key( $original, array_flip( array( 'id', 'Slot', 'System_Number', 'Zoho_Item_ID' ) ) );
+			$api->deal['Quoted_Equipment'][ $index ]['Brand'] = $populated ? $original['Brand'] : null;
+			$api->deal['Quoted_Equipment'][ $index ]['Model'] = $populated ? $original['Model'] : null;
+		}
+	}
+	function cc_assert_sparse_crm_update( array $updates ): void {
+		foreach ( $updates as $row ) {
+			if ( array_key_exists( '_delete', $row ) ) { cc_same( array( 'id', '_delete' ), array_keys( $row ), 'Deletion carries only exact old row ID and deletion marker.' ); continue; }
+			$keys = array_keys( $row ); sort( $keys, SORT_STRING );
+			$expected = array( 'Brand', 'Model', 'Slot', 'System_Number', 'Zoho_Item_ID' ); if ( isset( $row['id'] ) ) { $expected[] = 'id'; } sort( $expected, SORT_STRING );
+			cc_same( $expected, $keys, 'Only verified sparse CRM contract fields are transmitted.' );
+		}
+	}
+	cc_case( 'Sparse actual CRM schema with null Brand and Model supports link and verified existing-quote update', function (): void {
+		cc_reset(); cc_sparse_crm(); $api = Zoho_API::instance();
+		foreach ( array( 0, 1 ) as $index ) { cc_same( null, $api->deal['Quoted_Equipment'][ $index ]['Brand'], 'Initial supported Brand is unknown.' ); cc_same( null, $api->deal['Quoted_Equipment'][ $index ]['Model'], 'Initial supported Model is unknown.' ); cc_same( 6, count( $api->deal['Quoted_Equipment'][ $index ] ), 'All other generated optional fields are absent.' ); }
+		$token = cc_token( cc_link() ); $record = $GLOBALS['cc_options'][ cc_record_key() ];
+		$contract = $record['crm_field_contract']; sort( $contract, SORT_STRING ); cc_same( array( 'Brand', 'Model', 'Slot', 'System_Number', 'Zoho_Item_ID' ), $contract, 'Presence establishes only this supported field contract.' );
+		$result = cc_apply( $token ); cc_check( is_array( $result ) && 'saved' === ( $result['state'] ?? '' ) && false === ( $result['crm_sync_pending'] ?? true ), 'Sparse existing quote and deal update is read-confirmed.' );
+		$crm = cc_writes( 'crm' ); cc_same( 1, count( $crm ), 'One paired CRM mutation.' ); cc_same( 25500.0, (float) $crm[0]['body']['data'][0]['Amount'], 'Deal amount matches chosen sales total.' ); cc_assert_sparse_crm_update( $crm[0]['body']['data'][0]['Quoted_Equipment'] );
+		cc_same( 'Fixture', $api->deal['Quoted_Equipment'][0]['Brand'], 'Supported formerly-null Brand is populated from chosen catalog item.' ); cc_same( 'FIX-2', $api->deal['Quoted_Equipment'][0]['Model'], 'Supported formerly-null Model is populated from chosen item.' );
+		cc_same( 3, count( $api->deal['Quoted_Equipment'] ), 'Two owned and one independent row remain.' ); cc_same( 'preserve independent row', $api->deal['Quoted_Equipment'][2]['Fixture_Independent_Field'], 'Independent row untouched.' );
+	});
+	cc_case( 'Sparse CRM schema with populated matching supported descriptors remains compatible', function (): void {
+		cc_reset(); cc_sparse_crm( true ); $token = cc_token( cc_link() ); $result = cc_apply( $token ); cc_check( is_array( $result ) && 'saved' === ( $result['state'] ?? '' ), 'Known matching supported descriptors bind normally.' ); cc_assert_sparse_crm_update( cc_writes( 'crm' )[0]['body']['data'][0]['Quoted_Equipment'] );
+	});
+	cc_case( 'A populated supported CRM descriptor that disagrees with the original quote blocks link creation', function (): void {
+		cc_reset(); cc_sparse_crm(); Zoho_API::instance()->deal['Quoted_Equipment'][0]['Brand'] = 'Independent different brand'; cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ), 409 ); cc_same( 0, count( cc_writes() ), 'No unsupported ownership assumption can change Books.' );
+	});
+	foreach ( array( 'id', 'Slot', 'System_Number', 'Zoho_Item_ID' ) as $field ) {
+		cc_case( 'Missing required sparse CRM field blocks initial link: ' . $field, function () use ( $field ): void {
+			cc_reset(); cc_sparse_crm(); unset( Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] ); cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ) ); cc_same( 0, count( cc_writes() ), 'Missing required quote identity never authorizes Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No speculative CRM repair.' );
+		});
+		cc_case( 'Required sparse CRM field disappearing after link blocks both provider writes: ' . $field, function () use ( $field ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); unset( Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] ); cc_error( cc_apply( $token ), 409 ); cc_same( 0, count( cc_writes() ), 'Missing required identity blocks before Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No speculative CRM correction.' );
+		});
+	}
+	foreach ( array( 'Slot' => 'independent_slot', 'System_Number' => 0, 'Zoho_Item_ID' => 'bad-item', 'id' => 'bad-row' ) as $field => $value ) {
+		cc_case( 'Invalid required sparse CRM identity blocks package replacement: ' . $field, function () use ( $field, $value ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] = $value; cc_error( cc_apply( $token ), 409 ); cc_same( 0, count( cc_writes() ), 'Invalid required identity blocks before Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No arbitrary CRM write.' );
+		});
+	}
+	foreach ( array( 'Brand', 'Model' ) as $field ) {
+		cc_case( 'Supported sparse descriptor changed independently after link blocks both writes: ' . $field, function () use ( $field ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] = 'Independent descriptor change'; cc_error( cc_apply( $token ), 409 ); cc_same( 0, count( cc_writes() ), 'Supported descriptor drift is checked before Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'Independent supported descriptor not overwritten.' );
+		});
+		cc_case( 'Supported sparse descriptor disappearing after link blocks both writes: ' . $field, function () use ( $field ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); unset( Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] ); cc_error( cc_apply( $token ), 409 ); cc_same( 0, count( cc_writes() ), 'Schema support cannot silently shrink before Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No guesses about removed CRM schema.' );
+		});
+	}
+	foreach ( array( 'Brand', 'Zoho_Item_ID' ) as $field ) {
+		cc_case( 'Sparse CRM post-update field loss remains partial and GET-only on replay: ' . $field, function () use ( $field ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); Zoho_API::instance()->crm_drop_fields_after_write = array( $field );
+			$first = cc_apply( $token ); cc_check( is_array( $first ) && 'books_updated' === ( $first['state'] ?? '' ) && true === ( $first['crm_sync_pending'] ?? false ), 'Failed provider readback remains explicit partial.' ); cc_same( '', $first['review_url'] ?? '', 'No Books approval shortcut before paired update verified.' );
+			$next = cc_apply( $token ); cc_check( is_array( $next ) && true === ( $next['crm_sync_pending'] ?? false ), 'Missing provider field is not invented as successful.' ); cc_same( 1, count( cc_writes() ), 'No repeated Books PUT.' ); cc_same( 1, count( cc_writes( 'crm' ) ), 'No blind repeated CRM PUT.' );
+		});
+	}
+	foreach ( array( 'Rate' => 7001.0, 'Short_Description' => 'New independent schema scope' ) as $field => $value ) {
+		cc_case( 'A known optional CRM field appearing after sparse link issuance requires review: ' . $field, function () use ( $field, $value ): void {
+			cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); Zoho_API::instance()->deal['Quoted_Equipment'][0][ $field ] = $value;
+			cc_error( cc_apply( $token ), 409 ); cc_same( 0, count( cc_writes() ), 'Expanded known schema is detected before Books mutation.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'New independently populated optional field is not overwritten.' );
+		});
+	}
+	cc_case( 'Inconsistent supported optional schema between original owned rows blocks link issuance', function (): void {
+		cc_reset(); cc_sparse_crm(); unset( Zoho_API::instance()->deal['Quoted_Equipment'][1]['Model'] );
+		cc_error( Customer_Choices::instance()->link_for_estimate( '400000000000000001', 1 ), 409 ); cc_same( 0, count( cc_writes() ), 'Ambiguous original schema blocks before Books.' ); cc_same( 0, count( cc_writes( 'crm' ) ), 'No speculative subform repair.' );
+	});
+	cc_case( 'Unrecognized provider metadata does not expand the optional CRM write contract', function (): void {
+		cc_reset(); cc_sparse_crm(); $token = cc_token( cc_link() ); Zoho_API::instance()->deal['Quoted_Equipment'][0]['Fixture_Provider_Metadata'] = array( 'opaque' => 'Synthetic metadata, not an equipment field.' );
+		$result = cc_apply( $token ); cc_check( is_array( $result ) && 'saved' === ( $result['state'] ?? '' ), 'Unrelated provider metadata does not block the existing equipment contract.' ); cc_assert_sparse_crm_update( cc_writes( 'crm' )[0]['body']['data'][0]['Quoted_Equipment'] );
+		cc_check( isset( Zoho_API::instance()->deal['Quoted_Equipment'][0]['Fixture_Provider_Metadata'] ), 'Unsupported metadata is preserved by omission.' );
+	});
+
+	cc_case( 'Sparse schema component alternative appends new slots with supported fields and deletes only the owned old row', function (): void {
+		cc_reset(); cc_component_offer(); cc_sparse_crm(); $token = cc_token( cc_link() ); $result = cc_apply( $token, 1, 'fixture-sparse-components', cc_selections( 'gold', 'silver' ) );
+		cc_check( is_array( $result ) && 'saved' === ( $result['state'] ?? '' ), 'Mixed slot update is verified under actual sparse schema.' ); $rows = cc_writes( 'crm' )[0]['body']['data'][0]['Quoted_Equipment']; cc_assert_sparse_crm_update( $rows );
+		cc_same( 2, count( array_filter( $rows, static fn ( array $row ): bool => ! isset( $row['id'] ) ) ), 'Only two new component slots append.' ); cc_same( 4, count( Zoho_API::instance()->deal['Quoted_Equipment'] ), 'Old lower package replaced by two components without duplicates.' );
 	});
 
 	function cc_endpoint(): \TempControl\Estimate\Endpoints\Customer_Choices_Endpoint { return \TempControl\Estimate\Endpoints\Customer_Choices_Endpoint::instance(); }

@@ -11,6 +11,8 @@ final class Customer_Choices {
 	private const MAX_BYTES = 524288;
 	private const MAX_REQUESTS = 20;
 	private const TTL = 2592000;
+	private const CRM_CORE_FIELDS = array( 'Slot', 'System_Number', 'Zoho_Item_ID' );
+	private const CRM_FIELDS = array( 'Slot', 'System_Number', 'System_Label', 'Name', 'Brand', 'Model', 'Zoho_Item_ID', 'CRM_Equipment_ID', 'Rate', 'Short_Description', 'SEER', 'AFUE', 'Tons', 'BTU_Input', 'BTU_Output', 'Refrigerant' );
 	private ?array $held_lock = null;
 	public static function instance(): self { return self::$instance ??= new self(); }
 
@@ -94,7 +96,11 @@ final class Customer_Choices {
 		);
 		$deal = $this->get_deal( $record );
 		if ( is_wp_error( $deal ) ) { return $deal; }
-		$crm_baseline = $this->crm_snapshot( $deal, $record, $this->crm_rows( $projected, $catalog ), $total );
+		$initial_rows = $this->crm_rows( $projected, $catalog );
+		$contract = $this->crm_contract( $deal, $initial_rows );
+		if ( false === $contract ) { return $this->error( 'changed', 409 ); }
+		$record['crm_field_contract'] = $contract;
+		$crm_baseline = $this->crm_snapshot( $deal, $record, $initial_rows, $total, null, true );
 		if ( false === $crm_baseline ) { return $this->error( 'changed', 409 ); }
 		$record['crm_baseline'] = $crm_baseline;
 		$record['signature_hash'] = hash( 'sha256', $this->signature( $record ) );
@@ -507,26 +513,51 @@ final class Customer_Choices {
 		return $deal;
 	}
 	private function crm_key( array $row ): string { return (int) ( $row['System_Number'] ?? 0 ) . ':' . (string) ( $row['Slot'] ?? '' ); }
-	private function crm_fields( array $row ): array {
+	/** Presence is evidence of support; unknown aliases and provider metadata are excluded. */
+	private function crm_contract( array $deal, array $expected ): array|false {
+		$fields = self::CRM_FIELDS;
+		foreach ( $expected as $want ) {
+			$key = $this->crm_key( $want );
+			$matches = array_values( array_filter( $deal['Quoted_Equipment'], fn( mixed $row ): bool => is_array( $row ) && $key === $this->crm_key( $row ) ) );
+			if ( 1 !== count( $matches ) || ! $this->valid_id( (string) ( $matches[0]['id'] ?? '' ) ) || array_diff( self::CRM_CORE_FIELDS, array_keys( $matches[0] ) ) ) { return false; }
+			$fields = array_values( array_intersect( $fields, array_keys( $matches[0] ) ) );
+		}
+		return ! empty( $expected ) && ! array_diff( self::CRM_CORE_FIELDS, $fields ) ? $fields : false;
+	}
+	private function crm_fields( array $row, array $contract ): array|false {
+		if ( ! array_is_list( $contract ) || count( $contract ) !== count( array_unique( $contract ) ) || array_diff( self::CRM_CORE_FIELDS, $contract ) || array_diff( $contract, self::CRM_FIELDS ) || array_diff( $contract, array_keys( $row ) ) ) { return false; }
+		if ( ! is_string( $row['Slot'] ) || '' === $row['Slot'] || ! is_numeric( $row['System_Number'] ) || (float) $row['System_Number'] < 1 || (float) $row['System_Number'] > 10 || floor( (float) $row['System_Number'] ) !== (float) $row['System_Number'] || ! is_string( $row['Zoho_Item_ID'] ) || ! $this->valid_item_id( $row['Zoho_Item_ID'] ) ) { return false; }
 		$out = array();
-		foreach ( array( 'Slot', 'System_Number', 'System_Label', 'Name', 'Brand', 'Model', 'Zoho_Item_ID', 'CRM_Equipment_ID', 'Rate', 'Short_Description', 'SEER', 'AFUE', 'Tons', 'BTU_Input', 'BTU_Output', 'Refrigerant' ) as $key ) {
-			$value = $row[ $key ] ?? '';
+		foreach ( $contract as $key ) {
+			$value = $row[ $key ];
+			if ( null !== $value && ! is_scalar( $value ) ) { return false; }
 			if ( in_array( $key, array( 'System_Number', 'Rate', 'SEER', 'AFUE', 'Tons', 'BTU_Input', 'BTU_Output' ), true ) && is_numeric( $value ) ) { $value = number_format( (float) $value, 6, '.', '' ); }
 			$out[ $key ] = (string) $value;
 		}
 		return $out;
 	}
 	/** Verify all owned rows, while leaving independent subform rows outside the snapshot. */
-	private function crm_snapshot( array $deal, array $record, array $expected, float $total, ?array $previous = null ): array|false {
+	private function crm_snapshot( array $deal, array $record, array $expected, float $total, ?array $previous = null, bool $initial = false ): array|false {
 		if ( abs( (float) $deal['Amount'] - $total ) > 0.010000001 ) { return false; }
+		$contract = (array) ( $record['crm_field_contract'] ?? array() );
 		$rows = array();
 		foreach ( $expected as $want ) {
 			$key = $this->crm_key( $want );
 			$matches = array_values( array_filter( $deal['Quoted_Equipment'], fn( mixed $row ): bool => is_array( $row ) && $key === $this->crm_key( $row ) ) );
-			if ( isset( $rows[ $key ] ) || 1 !== count( $matches ) || ! $this->valid_id( (string) ( $matches[0]['id'] ?? '' ) ) || $this->crm_fields( $matches[0] ) !== $this->crm_fields( $want ) ) { return false; }
+			if ( isset( $rows[ $key ] ) || 1 !== count( $matches ) || ! $this->valid_id( (string) ( $matches[0]['id'] ?? '' ) ) ) { return false; }
+			if ( array_values( array_intersect( self::CRM_FIELDS, array_keys( $matches[0] ) ) ) !== $contract ) { return false; }
+			$actual_fields = $this->crm_fields( $matches[0], $contract );
+			$wanted_fields = $this->crm_fields( $want, $contract );
+			if ( false === $actual_fields || false === $wanted_fields ) { return false; }
+			foreach ( $contract as $field ) {
+				// Legacy optional descriptors may be unknown. Capture that exact empty
+				// baseline; never relax required identity or later drift comparisons.
+				if ( $initial && ! in_array( $field, self::CRM_CORE_FIELDS, true ) && '' === $actual_fields[ $field ] ) { continue; }
+				if ( $actual_fields[ $field ] !== $wanted_fields[ $field ] ) { return false; }
+			}
 			// Existing owned slots must keep their row identity, never silently append.
 			if ( isset( $previous['rows'][ $key ] ) && (string) $matches[0]['id'] !== $previous['rows'][ $key ]['id'] ) { return false; }
-			$rows[ $key ] = array( 'id' => (string) $matches[0]['id'], 'fields' => $this->crm_fields( $matches[0] ) );
+			$rows[ $key ] = array( 'id' => (string) $matches[0]['id'], 'fields' => $actual_fields );
 		}
 		foreach ( (array) ( $previous['rows'] ?? array() ) as $key => $old ) {
 			if ( isset( $rows[ $key ] ) ) { continue; }
@@ -547,6 +578,8 @@ final class Customer_Choices {
 		$used = array();
 		foreach ( $desired as $row ) {
 			$key = $this->crm_key( $row );
+			if ( false === $this->crm_fields( $row, (array) ( $record['crm_field_contract'] ?? array() ) ) ) { return false; }
+			$row = array_intersect_key( $row, array_flip( $record['crm_field_contract'] ) );
 			$old = $record['crm_baseline']['rows'][ $key ] ?? null;
 			if ( is_array( $old ) ) { $row['id'] = $old['id']; }
 			else {

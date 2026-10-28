@@ -10,7 +10,12 @@ export const EQUIPMENT_CATEGORIES = [
 ];
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 200;
-const emptyFacets = () => ({ btus: [], tons: [], efficiencies: [] });
+const emptyFacets = () => ({
+  btus: [],
+  tons: [],
+  efficiencies: [],
+  category2: [],
+});
 
 function ratingOptions(values, selected) {
   const ratings = new Set(
@@ -39,6 +44,7 @@ export function EquipmentPicker({
     btu: "",
     tons: "",
     efficiency: "",
+    category2: "",
     page: 1,
   });
   const [result, setResult] = React.useState(null);
@@ -116,6 +122,9 @@ export function EquipmentPicker({
           efficiencies: Array.isArray(response?.facets?.efficiencies)
             ? response.facets.efficiencies
             : [],
+          category2: Array.isArray(response?.facets?.category2)
+            ? response.facets.category2
+            : [],
         });
         setStatus("idle");
       } catch (requestError) {
@@ -172,6 +181,14 @@ export function EquipmentPicker({
     facets.efficiencies,
     filters.efficiency,
   ).filter((rating) => rating <= 100);
+  const category2Values = [
+    ...new Set([
+      ...facets.category2.filter(
+        (value) => typeof value === "string" && value.trim(),
+      ),
+      ...(filters.category2 ? [filters.category2] : []),
+    ]),
+  ];
 
   async function pick(item) {
     if (
@@ -200,6 +217,8 @@ export function EquipmentPicker({
         detail.item_id !== item.item_id ||
         detail.selection_category !== item.selection_category ||
         detail.selection_category !== currentFilters.current.category ||
+        (currentFilters.current.category2 &&
+          detail.category_2 !== currentFilters.current.category2) ||
         !Number.isFinite(detail.rate) ||
         detail.rate !== item.rate
       )
@@ -268,6 +287,7 @@ export function EquipmentPicker({
                           btu: "",
                           tons: "",
                           efficiency: "",
+                          category2: "",
                           page: 1,
                         },
                         true,
@@ -293,6 +313,29 @@ export function EquipmentPicker({
             />
           </label>
           <div className="tc-selector-filters">
+            <label className="tc-field">
+              <span className="tc-field-label">Package level</span>
+              <select
+                className="tc-input"
+                aria-label="Package level"
+                value={filters.category2}
+                onChange={(event) =>
+                  changeFilters({ category2: event.target.value, page: 1 })
+                }
+              >
+                <option value="">All package levels</option>
+                {category2Values.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+              {ready && category2Values.length === 0 && (
+                <span className="tc-field-help">
+                  No package levels available
+                </span>
+              )}
+            </label>
             <label className="tc-field">
               <span className="tc-field-label">BTU</span>
               <select

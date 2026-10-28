@@ -13,7 +13,7 @@
   const CATALOG_ROUTE =
     /\/wp-json\/tc-estimate\/v1\/(equipment|templates)(\/|$|\?)/;
   const ONLINE_ONLY_ROUTE =
-    /\/wp-json\/tc-estimate\/v1\/(customers|preview|generate|update-estimate|send-estimate|send-status|webhook)/;
+    /\/wp-json\/tc-estimate\/v1\/(customers|customer-choices|preview|generate|update-estimate|send-estimate|send-status|webhook)/;
   const SHELL_ASSET = /\/app\/dist\/estimate-builder\.(js|css)(\?|$)/;
 
   self.addEventListener("install", (event) => {

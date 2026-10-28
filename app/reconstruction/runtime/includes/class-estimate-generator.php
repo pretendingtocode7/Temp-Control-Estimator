@@ -269,12 +269,53 @@ final class Estimate_Generator {
 				);
 			}
 		}
+		foreach ( $this->proposal_addon_lines( $view ) as $addon ) {
+			$line_items[] = array(
+				'key' => $addon['edit_key'], 'item_id' => $addon['item_id'], 'name' => $addon['name'],
+				'description' => $addon['description'], 'rate' => 0.0,
+			);
+		}
 
 		return array(
 			'line_items' => $line_items,
 			'notes'      => $this->books_notes( $customer, $view, $template_meta ),
 			'terms'      => $this->books_terms( $view ),
 		);
+	}
+
+	/** Add-ons are proposal-wide, canonical zero-price Books lines, not HVAC units. */
+	private function proposal_addon_lines( array $view ): array {
+		$names = array( 'maintenance' => 'New Residential System Maintenance Agreement', 'permits' => 'Permits & Inspections' );
+		$lines = array();
+		foreach ( $names as $key => $name ) {
+			$record = $view['proposal_addons'][ $key ] ?? null;
+			if ( ! is_array( $record ) || true !== ( $record['available'] ?? null ) || ( $record['name'] ?? null ) !== $name ||
+				! is_string( $record['item_id'] ?? null ) || 1 !== preg_match( '/^[0-9]{10,20}$/', $record['item_id'] ) ||
+				! is_numeric( $record['rate'] ?? null ) || 0.0 !== (float) $record['rate'] || (int) ( $record['quantity'] ?? 0 ) !== 1 ) {
+				continue;
+			}
+			$lines[] = array( 'item_id' => $record['item_id'], 'name' => $name,
+				'description' => $this->proposal_addon_description( $key ), 'rate' => 0.0, 'quantity' => 1,
+				'slot' => 'proposal_' . $key, 'system_num' => 0, 'edit_key' => 'proposal_' . $key . '_0' );
+		}
+		return $lines;
+	}
+
+	private function proposal_addon_description( string $key ): string {
+		return 'maintenance' === $key ? 'Renews at $349 for one unit.' : implode( "\n\n", array(
+			'Permit fees are not included in the project total.',
+			'Temp Control will prepare and complete all required permit paperwork and submit the necessary documentation to the local township on the homeowner’s behalf.',
+			'All work will be performed in accordance with local building codes and manufacturer specifications. Permit payment, pickup and scheduling of Inspections are the responsibility of the homeowner.',
+		) );
+	}
+
+	private function proposal_addon_html( array $view ): string {
+		$parts = array();
+		foreach ( $this->proposal_addon_lines( $view ) as $addon ) {
+			$parts[] = '<p><strong>' . esc_html( $addon['name'] ) . ' — $0.00</strong></p>';
+			$parts[] = '<p>' . nl2br( esc_html( $addon['description'] ) ) . '</p>';
+		}
+		return implode( "\n", $parts );
 	}
 
 	/**
@@ -362,6 +403,11 @@ final class Estimate_Generator {
 				'system_num'  => (int) ( $row['System_Number'] ?? 0 ),
 				'edit_key'    => (string) ( $row['Edit_Key'] ?? '' ),
 			);
+		}
+		// Alternatives live only in proposal_systems. These two proposal-level
+		// services are appended once and never become CRM equipment rows.
+		foreach ( $this->proposal_addon_lines( $view ) as $addon ) {
+			$line_items[] = $addon;
 		}
 
 		$books_edits = isset( $payload['books_edits'] ) && is_array( $payload['books_edits'] ) ? $payload['books_edits'] : array();
@@ -522,11 +568,14 @@ final class Estimate_Generator {
 			$parts[] = sprintf( '<p>%s</p>', nl2br( esc_html( $special_notes ) ) );
 		}
 
-		$parts[] = '<p><strong>Additional Notes</strong></p>';
-		$parts[] = '<ul>';
-		$parts[] = '<li>Permit fees are not included unless specifically listed on the estimate.</li>';
-		$parts[] = '<li>Temp Control will provide necessary permit paperwork.</li>';
-		$parts[] = '</ul>';
+		$parts[] = $this->proposal_addon_html( $view );
+		if ( ! isset( $view['proposal_addons']['permits'] ) ) {
+			$parts[] = '<p><strong>Additional Notes</strong></p>';
+			$parts[] = '<ul>';
+			$parts[] = '<li>Permit fees are not included unless specifically listed on the estimate.</li>';
+			$parts[] = '<li>Temp Control will provide necessary permit paperwork.</li>';
+			$parts[] = '</ul>';
+		}
 
 		return implode( "\n", array_filter( $parts ) );
 	}
@@ -657,6 +706,9 @@ final class Estimate_Generator {
 				$terms[] = (string) $note['text'];
 			}
 		}
+		foreach ( $this->proposal_addon_lines( $view ) as $addon ) {
+			$terms[] = $addon['name'] . ' — $0.00' . "\n" . $addon['description'];
+		}
 		return implode( "\n", $terms );
 	}
 
@@ -689,6 +741,10 @@ final class Estimate_Generator {
 		}
 		if ( count( $quoted_equipment_rows ) > 8 ) {
 			$lines[] = sprintf( '+%d additional item(s)', count( $quoted_equipment_rows ) - 8 );
+		}
+		foreach ( $this->proposal_addon_lines( $view ) as $addon ) {
+			$lines[] = $addon['name'] . ' — $0.00';
+			$lines[] = $addon['description'];
 		}
 		$lines[] = '';
 		$lines[] = 'Please use the Zoho Books review link in this email to approve the estimate when you are ready.';

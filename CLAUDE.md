@@ -28,6 +28,20 @@ The UI's internal `pricing.equipment_cost` must never become the legacy wire
 sales subtotal or leak into the customer document. Composite costs come from
 validated actual Books mapped-item purchase costs and quantities, not sales rates.
 
+The v0.4.14 changes add exact Category 2 filters, alternatives inside each
+physical system, and server-resolved zero-price maintenance/permit options.
+Read `docs/releases/v0.4.14-per-system-options.md` before changing these paths.
+All offered alternatives must validate; only one chosen option per physical
+system reaches Books/CRM. Comparison views must never expose purchase cost or
+charge every alternative. The public customer chooser updates the existing Books
+estimate only after an explicit selection submission. Final Books approval is
+separate and withheld while provider synchronization is incomplete. Read
+`app/reconstruction/CUSTOMER-CHOICES-OPERATIONS.md` before changing this flow:
+single-attempt writes, durable pending operations, customer/CRM binding and
+verified stopped-worker recovery are required safety boundaries.
+Use `npm run test:options` for the new current workflow; historical selector and
+parity evidence is preserved separately.
+
 ## What this is
 
 WordPress plugin for Temp Control HVAC field techs to generate Zoho Books estimates + CRM Deals

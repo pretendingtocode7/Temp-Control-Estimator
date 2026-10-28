@@ -14,6 +14,7 @@ describe("shared equipment selector API", () => {
         {
           item_id: "ac",
           selection_category: "ac",
+          category_2: null,
           rate: 5000,
           purchase_cost: null,
           efficiency_percent: null,
@@ -23,7 +24,7 @@ describe("shared equipment selector API", () => {
       page: 1,
       per_page: 50,
       has_more: false,
-      facets: { btus: [], tons: [], efficiencies: [] },
+      facets: { category2: [], btus: [], tons: [], efficiencies: [] },
     };
     const fetch = vi.fn().mockResolvedValue(response(envelope));
     vi.stubGlobal("fetch", fetch);
@@ -32,9 +33,16 @@ describe("shared equipment selector API", () => {
       nonce: "synthetic",
     });
     await expect(
-      api.searchEquipmentSelector({ category: "ac", efficiency: "" }),
+      api.searchEquipmentSelector({
+        category: "ac",
+        category2: "",
+        efficiency: "",
+      }),
     ).resolves.toEqual(envelope);
     expect(new URL(fetch.mock.calls[0][0]).searchParams.has("efficiency")).toBe(
+      false,
+    );
+    expect(new URL(fetch.mock.calls[0][0]).searchParams.has("category2")).toBe(
       false,
     );
   });
@@ -45,6 +53,7 @@ describe("shared equipment selector API", () => {
         {
           item_id: "10000000001",
           selection_category: "package",
+          category_2: "Gold & High-Efficiency / 2-stage",
           efficiency_percent: 95,
           purchase_cost: 3000,
           rate: 5000,
@@ -54,7 +63,12 @@ describe("shared equipment selector API", () => {
       page: 2,
       per_page: 50,
       has_more: true,
-      facets: { btus: [80000, 100000], tons: [1.5, 2], efficiencies: [85, 95] },
+      facets: {
+        category2: ["Silver", "Gold & High-Efficiency / 2-stage"],
+        btus: [80000, 100000],
+        tons: [1.5, 2],
+        efficiencies: [85, 95],
+      },
     };
     const fetch = vi.fn().mockResolvedValue(response(envelope));
     vi.stubGlobal("fetch", fetch);
@@ -65,6 +79,7 @@ describe("shared equipment selector API", () => {
     await expect(
       api.searchEquipmentSelector({
         category: "package",
+        category2: "Gold & High-Efficiency / 2-stage",
         q: "AC + furnace",
         btu: 100000,
         tons: 1.5,
@@ -77,6 +92,7 @@ describe("shared equipment selector API", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({
       selector: "1",
       category: "package",
+      category2: "Gold & High-Efficiency / 2-stage",
       q: "AC + furnace",
       btu: "100000",
       tons: "1.5",
@@ -104,7 +120,7 @@ describe("shared equipment selector API", () => {
           page: 1,
           per_page: 1,
           has_more: false,
-          facets: { btus: [], tons: [], efficiencies: [] },
+          facets: { category2: [], btus: [], tons: [], efficiencies: [] },
         }),
       );
     vi.stubGlobal("fetch", fetch);
@@ -130,5 +146,40 @@ describe("shared equipment selector API", () => {
       "coil",
     );
     expect(result.items).toEqual([]);
+  });
+
+  it("reads optional item availability through the fixed GET route without creating a transaction", async () => {
+    const descriptors = {
+      maintenance: {
+        available: true,
+        name: "New Residential System Maintenance Agreement",
+        item_id: "maintenance-id",
+        rate: 0,
+        renewal_rate: 349,
+        renewal_units: 1,
+      },
+      permits: {
+        available: false,
+        name: "Permits & Inspections",
+        item_id: null,
+        rate: 0,
+      },
+    };
+    const fetch = vi.fn().mockResolvedValue(response(descriptors));
+    vi.stubGlobal("fetch", fetch);
+    const api = createApi({
+      restUrl: "https://fixture.test/wp-json/tc-estimate/v1",
+      nonce: "synthetic",
+    });
+    await expect(api.getEquipmentAddons()).resolves.toEqual(descriptors);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://fixture.test/wp-json/tc-estimate/v1/equipment/addons",
+    );
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "GET",
+      credentials: "same-origin",
+    });
+    expect(fetch.mock.calls[0][1].body).toBeUndefined();
   });
 });

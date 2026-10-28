@@ -26,6 +26,7 @@ use TempControl\Estimate\Audit_Log;
 use TempControl\Estimate\Customer_Search;
 use TempControl\Estimate\Equipment_Catalog;
 use TempControl\Estimate\Estimate_Generator;
+use TempControl\Estimate\Proposal_Choices;
 use TempControl\Estimate\Rate_Limiter;
 use TempControl\Estimate\Security;
 use TempControl\Estimate\Template_CPT;
@@ -35,6 +36,8 @@ use WP_Error;
 use WP_REST_Request;
 
 defined( 'ABSPATH' ) || exit;
+
+require_once dirname( __DIR__ ) . '/includes/class-proposal-choices.php';
 
 final class Generate_Estimate extends Endpoint_Base {
 
@@ -97,6 +100,11 @@ final class Generate_Estimate extends Endpoint_Base {
 			}
 		}
 
+		$body = Proposal_Choices::instance()->normalize( $body );
+		if ( is_wp_error( $body ) ) {
+			return $this->fail( $body );
+		}
+
 		// --- Parse + validate core fields ---
 		$template_id = (int) ( $body['template_id'] ?? 0 );
 		if ( $template_id <= 0 ) {
@@ -124,11 +132,6 @@ final class Generate_Estimate extends Endpoint_Base {
 			return $this->fail( new WP_Error( 'tc_estimate_bad_systems', __( 'systems[] must contain at least one system.', 'tc-estimate' ), array( 'status' => 400 ) ) );
 		}
 
-		$pricing = isset( $body['pricing'] ) && is_array( $body['pricing'] ) ? $body['pricing'] : array();
-		if ( ! isset( $pricing['total'] ) || (float) $pricing['total'] <= 0 ) {
-			return $this->fail( new WP_Error( 'tc_estimate_bad_pricing', __( 'pricing.total must be greater than zero.', 'tc-estimate' ), array( 'status' => 400 ) ) );
-		}
-
 		// --- Hydrate customer (strict: any error is a hard failure for /generate) ---
 		$customer = Customer_Search::instance()->get_account( $account_id );
 		if ( is_wp_error( $customer ) ) {
@@ -136,7 +139,7 @@ final class Generate_Estimate extends Endpoint_Base {
 		}
 
 		// --- Hydrate every referenced item. Missing items are a hard error here (unlike /preview). ---
-		$item_ids = $this->collect_item_ids( $systems );
+		$item_ids = Proposal_Choices::instance()->collect_item_ids( $body );
 		if ( empty( $item_ids ) ) {
 			return $this->fail( new WP_Error( 'tc_estimate_no_equipment', __( 'At least one equipment item must be selected.', 'tc-estimate' ), array( 'status' => 400 ) ) );
 		}
@@ -153,11 +156,14 @@ final class Generate_Estimate extends Endpoint_Base {
 			$catalog_by_id[ $id ] = $item;
 		}
 
-		// Fresh server categories enforce Package/component exclusivity before any
-		// view, pending audit record or provider write. Completed replays stay above.
-		$selection = Equipment_Catalog::instance()->validate_selection( $systems, $catalog_by_id );
-		if ( is_wp_error( $selection ) ) {
-			return $this->fail( $selection );
+		// All offers are validated, but only one choice per system reaches Books/CRM.
+		$body = Proposal_Choices::instance()->project( $body, $catalog_by_id );
+		if ( is_wp_error( $body ) ) {
+			return $this->fail( $body );
+		}
+		$pricing = $body['pricing'];
+		if ( ! isset( $pricing['total'] ) || (float) $pricing['total'] <= 0 ) {
+			return $this->fail( new WP_Error( 'tc_estimate_bad_pricing', __( 'pricing.total must be greater than zero.', 'tc-estimate' ), array( 'status' => 400 ) ) );
 		}
 
 		// --- Build view + render body ---
@@ -226,25 +232,6 @@ final class Generate_Estimate extends Endpoint_Base {
 			'idempotency_key'    => $idempotency_key,
 			'duration_ms'        => $duration_ms,
 		), 201 );
-	}
-
-	/**
-	 * Walk systems and return every unique item_id (string).
-	 * @return string[]
-	 */
-	private function collect_item_ids( array $systems ): array {
-		$ids = array();
-		foreach ( $systems as $sys ) {
-			if ( ! is_array( $sys ) || empty( $sys['equipment'] ) || ! is_array( $sys['equipment'] ) ) {
-				continue;
-			}
-			foreach ( $sys['equipment'] as $slot ) {
-				if ( is_array( $slot ) && ! empty( $slot['item_id'] ) ) {
-					$ids[] = (string) $slot['item_id'];
-				}
-			}
-		}
-		return array_values( array_unique( $ids ) );
 	}
 
 	/**

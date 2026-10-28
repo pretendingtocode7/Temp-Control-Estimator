@@ -11,6 +11,11 @@ import {
   equipmentCostSummary,
   filterEquipment,
   newIdempotencyKey,
+  selectedEquipment,
+  selectedChoice,
+  systemSalesPrice,
+  sumSelectedSales,
+  hasSystemChoices,
 } from "../src/lib/utils.js";
 
 const fixture = () => ({
@@ -73,7 +78,7 @@ describe("reference-compatible draft model", () => {
       system_label: "Main System",
       equipment: {},
     });
-    expect(first.pricing).toEqual({
+    expect(first.pricing).toMatchObject({
       subtotal: 0,
       equipment_cost: 0,
       equipment_cost_manual: false,
@@ -86,6 +91,8 @@ describe("reference-compatible draft model", () => {
       warranty_labor_years: 10,
       financing_term_months: 60,
       financing_requested: false,
+      include_maintenance: false,
+      include_permits: false,
     });
     first.systems[0].equipment.furnace = {};
     expect(second.systems[0].equipment).toEqual({});
@@ -187,6 +194,7 @@ describe("reference-compatible draft model", () => {
     expect(payload.pricing).not.toHaveProperty("equipment_cost");
     expect(payload.pricing).not.toHaveProperty("equipment_cost_manual");
     expect(payload.pricing).not.toHaveProperty("total_manual");
+    expect(payload.pricing).not.toHaveProperty("project_adjustment");
   });
   it("keeps a selected package as one priced item and sends its canonical slot without hydrated component data", () => {
     const draft = fixture();
@@ -346,6 +354,270 @@ describe("reference-compatible draft model", () => {
       equipment_cost: null,
       equipment_cost_manual: false,
     });
+  });
+});
+
+const choiceIds = [
+  "00000000-0000-4000-8000-000000000001",
+  "00000000-0000-4000-8000-000000000002",
+  "00000000-0000-4000-8000-000000000003",
+  "00000000-0000-4000-8000-000000000004",
+];
+function quotedChoice(
+  index,
+  label,
+  rate,
+  purchase_cost,
+  sales_price = rate,
+  sales_price_manual = false,
+) {
+  return {
+    choice_id: choiceIds[index],
+    label,
+    sales_price,
+    sales_price_manual,
+    equipment: {
+      package: {
+        item_id: `package-${index}`,
+        name: `${label} package`,
+        category_2: label,
+        rate,
+        purchase_cost,
+        description: `${label} scope`,
+        notes: `${label} notes`,
+      },
+    },
+  };
+}
+function quotedSystem(number, choices, selectedIndex = 0) {
+  return {
+    system_number: number,
+    system_label: `System ${number}`,
+    system_id: `10000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
+    choices,
+    selected_choice_id: choices[selectedIndex].choice_id,
+  };
+}
+
+describe("alternatives within physical systems", () => {
+  it("counts one selected alternative per physical system and excludes unknown inactive purchase cost", () => {
+    const silver = quotedChoice(0, "Silver", 5000, 3000);
+    const gold = quotedChoice(1, "Gold", 6000, 4000, 6500, true);
+    const downstairs = quotedChoice(2, "Downstairs", 3000, 1000);
+    const inactive = quotedChoice(3, "Platinum", 20000, null);
+    const systems = [
+      quotedSystem(1, [silver, gold], 1),
+      quotedSystem(2, [downstairs, inactive]),
+    ];
+    expect(hasSystemChoices(systems)).toBe(true);
+    expect(selectedChoice(systems[0])).toEqual(gold);
+    expect(selectedEquipment(systems[0])).toEqual(gold.equipment);
+    expect(systemSalesPrice(systems[0])).toBe(6500);
+    expect(sumEquipment(systems)).toBe(9000);
+    expect(sumSelectedSales(systems)).toBe(9500);
+    expect(equipmentCostSummary(systems)).toEqual({
+      subtotal: 5000,
+      knownSubtotal: 5000,
+      selectedCount: 2,
+      missingCount: 0,
+    });
+    const state = draftReducer(createInitialState(), {
+      type: "setSystems",
+      systems,
+    });
+    expect(state.pricing).toMatchObject({
+      subtotal: 9000,
+      total: 9500,
+      equipment_cost: 5000,
+      project_adjustment: 0,
+    });
+  });
+
+  it("supports unchanged legacy equipment and refuses a stale mirror when a selected choice ID is invalid", () => {
+    const legacy = fixture().systems[0];
+    expect(hasSystemChoices([legacy])).toBe(false);
+    expect(selectedEquipment(legacy)).toEqual(legacy.equipment);
+    expect(systemSalesPrice(legacy)).toBe(3200);
+    const invalid = {
+      ...quotedSystem(1, [quotedChoice(0, "Silver", 5000, 3000)]),
+      selected_choice_id: choiceIds[3],
+      equipment: legacy.equipment,
+    };
+    expect(selectedChoice(invalid)).toBeNull();
+    expect(selectedEquipment(invalid)).toEqual({});
+    expect(sumEquipment([invalid])).toBe(0);
+    expect(sumSelectedSales([invalid])).toBe(0);
+    expect(
+      canAdvance({ ...fixture(), step: "systems", systems: [invalid] }),
+    ).toBe(false);
+    expect(
+      buildPayload({ ...fixture(), systems: [invalid] }).systems[0].equipment,
+    ).toEqual({});
+  });
+
+  it("recalculates each automatic alternative but preserves explicitly edited alternative sales prices", () => {
+    const silver = quotedChoice(0, "Silver", 5000, 3000, 1, false);
+    const gold = quotedChoice(1, "Gold", 6000, 4000, 6500, true);
+    const systems = [quotedSystem(1, [silver, gold])];
+    const state = draftReducer(createInitialState(), {
+      type: "setSystems",
+      systems,
+    });
+    expect(state.systems[0].choices[0].sales_price).toBe(5000);
+    expect(state.systems[0].choices[1].sales_price).toBe(6500);
+    expect(state.systems[0].choices[1].sales_price_manual).toBe(true);
+    expect(state.pricing.total).toBe(5000);
+    expect(silver.sales_price).toBe(1);
+  });
+
+  it.each([6200, 4500])(
+    "preserves legacy manual total %i as a project adjustment and retains that adjustment when choices switch",
+    (manualTotal) => {
+      let state = draftReducer(createInitialState(), {
+        type: "setSystems",
+        systems: [
+          {
+            system_number: 1,
+            system_label: "Main System",
+            equipment: {
+              package: {
+                item_id: "package-0",
+                rate: 5000,
+                purchase_cost: 3000,
+              },
+            },
+          },
+        ],
+      });
+      state = draftReducer(state, {
+        type: "setPricing",
+        pricing: { total: manualTotal, equipment_cost: 3500 },
+      });
+      const silver = quotedChoice(0, "Silver", 5000, 3000);
+      const gold = quotedChoice(1, "Gold", 6000, null, 6500, true);
+      state = draftReducer(state, {
+        type: "setSystems",
+        systems: [quotedSystem(1, [silver, gold])],
+      });
+      const adjustment = manualTotal - 5000;
+      expect(state.pricing).toMatchObject({
+        total: manualTotal,
+        project_adjustment: adjustment,
+        equipment_cost: 3500,
+        equipment_cost_manual: true,
+      });
+      state = draftReducer(state, {
+        type: "setSystems",
+        systems: [{ ...state.systems[0], selected_choice_id: gold.choice_id }],
+      });
+      expect(state.pricing.total).toBe(6500 + adjustment);
+      expect(state.pricing.project_adjustment).toBe(adjustment);
+      expect(state.pricing.equipment_cost).toBe(3500);
+      expect(equipmentCostSummary(state.systems).missingCount).toBe(1);
+      state = draftReducer(state, {
+        type: "setPricing",
+        pricing: { total: 8000 },
+      });
+      expect(state.pricing.project_adjustment).toBe(1500);
+      state = draftReducer(state, {
+        type: "setSystems",
+        systems: [
+          { ...state.systems[0], selected_choice_id: silver.choice_id },
+        ],
+      });
+      expect(state.pricing.total).toBe(6500);
+      expect(state.pricing.project_adjustment).toBe(1500);
+    },
+  );
+
+  it("projects only selected equipment while sanitizing alternative metadata and excluding internal IDs, costs and flags", () => {
+    const silver = quotedChoice(0, "Silver", 5000, 3000);
+    const gold = quotedChoice(1, "Gold", 6000, null, 6500, true);
+    const state = draftReducer(
+      { ...fixture(), pricing: { ...createInitialState().pricing } },
+      { type: "setSystems", systems: [quotedSystem(1, [silver, gold], 1)] },
+    );
+    const payload = buildPayload(state);
+    expect(payload.systems[0].equipment).toEqual({
+      package: {
+        item_id: "package-1",
+        description: "Gold scope",
+        notes: "Gold notes",
+      },
+    });
+    expect(payload.systems[0].selected_choice_id).toBe(gold.choice_id);
+    expect(payload.systems[0].choices).toEqual([
+      {
+        choice_id: silver.choice_id,
+        label: "Silver",
+        sales_price: 5000,
+        equipment: {
+          package: {
+            item_id: "package-0",
+            description: "Silver scope",
+            notes: "Silver notes",
+          },
+        },
+      },
+      {
+        choice_id: gold.choice_id,
+        label: "Gold",
+        sales_price: 6500,
+        equipment: {
+          package: {
+            item_id: "package-1",
+            description: "Gold scope",
+            notes: "Gold notes",
+          },
+        },
+      },
+    ]);
+    expect(payload.pricing).toMatchObject({
+      subtotal: 6000,
+      total: 6500,
+      project_adjustment: 0,
+    });
+    for (const forbidden of [
+      "system_id",
+      "purchase_cost",
+      "equipment_cost",
+      "sales_price_manual",
+      "total_manual",
+      "category_2",
+    ])
+      expect(JSON.stringify(payload)).not.toContain(`"${forbidden}"`);
+  });
+
+  it("sends free optional items once as project booleans and never charges their renewal rate", () => {
+    let state = draftReducer(createInitialState(), {
+      type: "setSystems",
+      systems: [
+        quotedSystem(1, [quotedChoice(0, "Silver", 5000, 3000)]),
+        quotedSystem(2, [quotedChoice(1, "Gold", 6000, 4000)]),
+      ],
+    });
+    state = draftReducer(state, {
+      type: "setOptions",
+      options: { include_maintenance: true, include_permits: true },
+    });
+    expect(state.pricing.total).toBe(11000);
+    const payload = buildPayload(state);
+    expect(payload.options).toMatchObject({
+      include_maintenance: true,
+      include_permits: true,
+    });
+    expect(payload.systems).toHaveLength(2);
+    expect(
+      payload.systems.every(
+        (system) =>
+          !Object.prototype.hasOwnProperty.call(
+            system,
+            "include_maintenance",
+          ) && !Object.prototype.hasOwnProperty.call(system, "include_permits"),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(payload)).not.toContain("349");
+    expect(payload.pricing.total).toBe(11000);
   });
 });
 

@@ -87,7 +87,7 @@ async function choose(page, system, item) {
       exact: true,
     })
     .click();
-  for (const name of ["Category2", "BTU", "Tonnage", "Efficiency (%)"])
+  for (const name of ["Package level", "BTU", "Tonnage", "Efficiency (%)"])
     await dialog.getByRole("combobox", { name, exact: true }).selectOption("");
   await dialog
     .getByRole("searchbox", { name: "Search equipment", exact: true })
@@ -145,7 +145,7 @@ async function capture(run, name, project, dialog) {
     expect(box.y + box.height).toBeLessThanOrEqual(layout.viewport[1] + 1);
     for (const control of [
       dialog.getByRole("searchbox", { name: "Search equipment", exact: true }),
-      ...["Category2", "BTU", "Tonnage", "Efficiency (%)"].map((label) =>
+      ...["Package level", "BTU", "Tonnage", "Efficiency (%)"].map((label) =>
         dialog.getByRole("combobox", { name: label, exact: true }),
       ),
     ]) {
@@ -241,18 +241,18 @@ async function report(run, project, scenario, details = {}) {
   await run.page.close();
 }
 
-test("Category2 is an exact AND filter with capacity, efficiency, search, pagination and stale response protection", async ({
+test("Package level is an exact AND filter with capacity, efficiency, search, pagination and stale response protection", async ({
   context,
 }, info) => {
   const run = await open(context),
     { page, fixture } = run;
   const dialog = await picker(page);
   const category2 = dialog.getByRole("combobox", {
-    name: "Category2",
+    name: "Package level",
     exact: true,
   });
   await expect(category2.locator("option")).toHaveText([
-    "All Category2 values",
+    "All package levels",
     ...category2Values,
   ]);
   await dialog
@@ -329,7 +329,7 @@ test("Category2 is an exact AND filter with capacity, efficiency, search, pagina
   const reset = await picker(page);
   await reset.getByRole("button", { name: "AC", exact: true }).click();
   await expect(
-    reset.getByRole("combobox", { name: "Category2", exact: true }),
+    reset.getByRole("combobox", { name: "Package level", exact: true }),
   ).toHaveValue("");
   await expect(reset.getByText(ac.name, { exact: true })).toBeVisible();
   await report(run, info.project.name, "category2-catalog", {

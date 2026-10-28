@@ -314,16 +314,16 @@ export function EquipmentPicker({
           </label>
           <div className="tc-selector-filters">
             <label className="tc-field">
-              <span className="tc-field-label">Category2</span>
+              <span className="tc-field-label">Package level</span>
               <select
                 className="tc-input"
-                aria-label="Category2"
+                aria-label="Package level"
                 value={filters.category2}
                 onChange={(event) =>
                   changeFilters({ category2: event.target.value, page: 1 })
                 }
               >
-                <option value="">All Category2 values</option>
+                <option value="">All package levels</option>
                 {category2Values.map((value) => (
                   <option key={value} value={value}>
                     {value}
@@ -332,7 +332,7 @@ export function EquipmentPicker({
               </select>
               {ready && category2Values.length === 0 && (
                 <span className="tc-field-help">
-                  No Category2 values available
+                  No package levels available
                 </span>
               )}
             </label>

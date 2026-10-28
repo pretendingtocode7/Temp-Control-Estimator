@@ -451,7 +451,7 @@ describe("unified equipment picker", () => {
       target: { value: "95" },
     });
     await screen.findByText("Distant catalog match");
-    fireEvent.change(screen.getByRole("combobox", { name: /^Category ?2$/ }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Package level" }), {
       target: { value: "Gold & High-Efficiency / 2-stage" },
     });
     await screen.findByText("Distant catalog match");
@@ -519,7 +519,7 @@ describe("unified equipment picker", () => {
         "95",
       ),
     );
-    fireEvent.change(screen.getByRole("combobox", { name: /^Category ?2$/ }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Package level" }), {
       target: { value: "Silver" },
     });
     await waitFor(() =>
@@ -529,7 +529,7 @@ describe("unified equipment picker", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "AC", exact: true }));
     await screen.findByText("ac page 1");
-    expect(screen.getByRole("combobox", { name: /^Category ?2$/ }).value).toBe(
+    expect(screen.getByRole("combobox", { name: "Package level" }).value).toBe(
       "",
     );
     expect(screen.getByRole("combobox", { name: "BTU" }).value).toBe("");
@@ -599,7 +599,7 @@ describe("unified equipment picker", () => {
     await waitFor(() => expect(onPick).toHaveBeenCalledExactlyOnceWith(newer));
   });
 
-  it.each(["BTU", "Tonnage", "Efficiency (%)", "Category2", "category"])(
+  it.each(["BTU", "Tonnage", "Efficiency (%)", "Package level", "category"])(
     "clears selectable results immediately when %s changes",
     async (control) => {
       const first = packageItem({ name: "Previously selectable package" });
@@ -621,7 +621,7 @@ describe("unified equipment picker", () => {
       else
         fireEvent.change(
           screen.getByRole("combobox", {
-            name: control === "Category2" ? /^Category ?2$/ : control,
+            name: control,
           }),
           {
             target: {
@@ -701,7 +701,7 @@ describe("unified equipment picker", () => {
           .map((option) => option.value),
       ).toEqual([""]);
     expect(
-      within(screen.getByRole("combobox", { name: /^Category ?2$/ }))
+      within(screen.getByRole("combobox", { name: "Package level" }))
         .getAllByRole("option")
         .map((option) => option.value),
     ).toEqual([""]);
